@@ -1,0 +1,51 @@
+cabal-version: 2.2
+name: extensible-data
+version: 0.1.0
+category: Data
+synopsis: Generate the boilerplate for the Trees That Grow pattern
+-- description: TODO
+license: GPL-3.0-or-later
+
+author: Andy Morris <andy@cryptium.ch>
+maintainer: Andy Morris <andy@cryptium.ch>
+
+
+common deps
+  default-language: Haskell2010
+  build-depends:
+    base ^>= 4.13.0.0,
+    syb ^>= 0.7.1,
+    template-haskell ^>= 2.15.0.0
+  ghc-options:
+    -Wall
+
+flag dump-splices
+  description: Show the results of splices in the examples
+  default: True
+  manual: True
+
+flag recomp-examples
+  description:
+    Always recompile the examples (to see the splices each time); ignored if
+    flag(dumps-splices) is false
+  default: False
+  manual: True
+
+common example
+  build-depends: extensible-data
+  if flag(dump-splices)
+    ghc-options: -ddump-splices
+    if flag(recomp-examples)
+      ghc-options: -fforce-recomp
+
+library
+  import: deps
+  hs-source-dirs: src
+  exposed-modules:
+    Extensible
+
+executable example1
+  import: deps, example
+  hs-source-dirs: examples
+  main-is: Example1.hs
+  other-modules: Example1Base
