@@ -21,82 +21,85 @@
 --   same name), containing it as its sole field.
 --
 -- Note that due to GHC's staging restriction, it is not possible to write
--- @extensible [d| data Foo = ... |]@ and use the generated @extendFoo@ function
--- within the same module.
+-- @'extensible' [d| data Foo = ... |]@ and use the generated @extendFoo@
+-- function within the same module.
 --
--- Example:
+-- == Example
 --
 -- @
--- module Foo.Base where
--- import E -- FIXME real module name
+-- module Foo.Base where #Foo_Base#
+-- import Extensible
 --
--- extensible [d| data Foo a = Bar a | Baz (Foo a) (Foo Int) |]
+-- 'extensible' [d| data Foo a = Bar a | Baz (Foo a) (Foo 'Int') |]
 --
 -- ====>
 --
--- type family XBar ext a
--- type family XBaz ext a
--- type family FooX ext a
+-- type family XBar ext a #XBar#
+-- type family XBaz ext a #XBaz#
+-- type family FooX ext a #FooX#
 --
--- data Foo' ext a =
---     Bar' a                           !(XBar ext a)
---   | Baz' (Foo' ext a) (Foo' ext Int) !(XBaz ext a)
---   | FooX !(FooX ext a)
+-- data Foo' ext a = #Foo'#
+--     Bar' a !(<#XBar XBar> ext a) #Bar'#
+--   | Baz' (<#Foo' Foo'> ext a) (<#Foo' Foo'> ext 'Int') !(<#XBaz XBaz> ext a) #Baz'#
+--   | FooX !(<#FooX FooX> ext a) #FooX#
 --
--- data ExtFoo = ExtFoo {
---     nameBar  :: String,
---     typeBar  :: Maybe (TypeQ -> TypeQ),
---     nameBaz  :: String,
---     typeBaz  :: Maybe (TypeQ -> TypeQ),
---     typeFooX :: [(String, TypeQ -> TypeQ)]
+-- data ExtFoo = ExtFoo { #ExtFoo#
+--     nameBar  :: 'String',                        #nameBar#
+--     typeBar  :: 'Maybe' ('TypeQ' -> 'TypeQ'),    #typeBar#
+--     nameBaz  :: 'String',                        #nameBaz#
+--     typeBaz  :: 'Maybe' ('TypeQ' -> 'TypeQ'),    #typeBaz#
+--     typeFooX :: [('String', 'TypeQ' -> 'TypeQ')] #typeFooX#
 --   }
 --
--- defaultExtFoo :: ExtFoo
--- defaultExtFoo = ExtFoo {
---     nameBar  = "Bar",
---     typeBar  = Just $ \_ -> [t| () |],
---     nameBaz  = "Baz",
---     typeBaz  = Just $ \_ -> [t| () |],
---     typeFooX = []
+-- defaultExtFoo :: <#ExtFoo ExtFoo> #defaultExtFoo#
+-- defaultExtFoo = <#ExtFoo ExtFoo> {
+--     <#nameBar nameBar>  = \"Bar\",
+--     <#typeBar typeBar>  = 'Just' $ \\_ -> [t| () |],
+--     <#nameBaz nameBaz>  = \"Baz\",
+--     <#typeBaz typeBaz>  = 'Just' $ \\_ -> [t| () |],
+--     <#typeFooX typeFooX> = []
 --   }
 --
--- extendFoo :: String -- ^ Type alias name
---           -> TypeQ  -- ^ Tag for this annotation
---           -> ExtFoo
---           -> DecsQ
--- extendFoo = ...
+-- extendFoo :: 'String' -- ^ Type alias name  #extendFoo#
+--           -> 'TypeQ'  -- ^ Tag for this annotation
+--           -> <#ExtFoo ExtFoo>
+--           -> 'DecsQ'
+-- extendFoo name tag exts = ...
 -- @
 --
 -- @
--- module Foo (module Foo.Base, module Foo) where
--- import Foo.Base
+-- module Foo (module <#Foo.Base Foo.Base>, module Foo) where
+-- import <#Foo_Base Foo.Base>
 --
--- extendFoo "Foo" [t| () |] $ defaultExtFoo {
---   typeBar = Nothing,
---   extFooX = [("Quux", \_ -> [t|Int|]),
---              ("Zoop", \a -> [t|Foo' () $a|])]
+-- data QZ #QZ#
+--
+-- <#extendFoo extendFoo> \"Foo\" [t|<#QZ QZ>|] $ <#defaultExtFoo defaultExtFoo> {
+--   <#typeBar typeBar> = 'Nothing',
+--   <#typeFooX typeFooX> =
+--     [(\"Quux\", \\_ -> [t|'Int'|]),
+--      (\"Zoop\", \\a -> [t|<#Foo' Foo'> <#QZ QZ> $a|])]
 -- }
 --
 -- ====>
 --
--- type instance XBar () a = Void
--- type instance XBaz () a = ()
--- type instance FooX () a = Either Int Bool
+-- type instance <#XBar XBar> <#QZ QZ> a = 'Void'
+-- type instance <#XBaz XBaz> <#QZ QZ> a = ()
+-- type instance <#FooX FooX> <#QZ QZ> a = 'Either' 'Int' 'Bool'
 --
--- type Foo = Foo' ()
+-- type Foo = <#Foo' Foo'> <#QZ QZ> #Foo#
 --
--- -- no pattern for Bar
+-- -- no pattern for <#Bar' Bar'>
 --
--- pattern Baz :: Foo a -> Foo Int -> Foo a
--- pattern Baz x y = Baz' x y ()
+-- pattern Baz :: <#Foo Foo> a -> <#Foo Foo> 'Int' -> <#Foo Foo> a #Baz#
+-- pattern Baz x y = <#Baz' Baz'> x y ()
 --
--- pattern Quux :: Int -> Foo a
--- pattern Quux x = FooX (Left x)
+-- pattern Quux :: 'Int' -> <#Foo Foo> a #Quux#
+-- pattern Quux x = <#FooX FooX> ('Left' x)
 --
--- pattern Zoop :: Foo a -> Foo a
--- pattern Zoop x = FooX (Right x)
+-- pattern Zoop :: <#Foo Foo> a -> <#Foo Foo> a #Zoop#
+-- pattern Zoop x = <#FooX FooX> ('Right' x)
 --
--- {-# COMPLETE Baz, Quux, Zoop #-}
+-- {-\# COMPLETE <#Baz Baz>, <#Quux Quux>, <#Zoop Zoop> #-}
 -- @
 module Extensible
   (-- * Name manipulation
@@ -126,7 +129,9 @@ data NameAffix =
   NameAffix {naPrefix, naSuffix :: String}
   deriving (Eq, Show, Lift)
 pattern NamePrefix, NameSuffix :: String -> NameAffix
+-- | Just a prefix, with an empty suffix
 pattern NamePrefix pre = NameAffix {naPrefix = pre, naSuffix = ""}
+-- | Just a suffix, with an empty prefix
 pattern NameSuffix suf = NameAffix {naPrefix = "",  naSuffix = suf}
 
 instance Semigroup NameAffix where
@@ -175,15 +180,15 @@ data Config = Config {
 --
 -- @
 -- Config {
---   datatypeName    = NameSuffix "'",
---   constructorName = NameSuffix "'",
---   annotationName  = NamePrefix "X",
---   extensionName   = NameSuffix "X",
---   extRecordName   = NamePrefix "Ext",
---   extRecTypeName  = NamePrefix "type",
---   extRecNameName  = NamePrefix "name",
---   defExtRecName   = NamePrefix "default",
---   extFunName      = NamePrefix "extend"
+--   datatypeName    = NameSuffix \"'\",
+--   constructorName = NameSuffix \"'\",
+--   annotationName  = NamePrefix \"X\",
+--   extensionName   = NameSuffix \"X\",
+--   extRecordName   = NamePrefix \"Ext\",
+--   extRecTypeName  = NamePrefix \"type\",
+--   extRecNameName  = NamePrefix \"name\",
+--   defExtRecName   = NamePrefix \"default\",
+--   extFunName      = NamePrefix \"extend\"
 -- }
 -- @
 defaultConfig :: Config
@@ -204,7 +209,7 @@ defaultConfig = Config {
 -- one argument for each type variable in the original datatype declaration.
 --
 -- * 'Ann': the annotation is the given type
--- * 'NoAnn': no annotation (filled in with '()' autmatically by the pattern
+-- * 'NoAnn': no annotation (filled in with @()@ automatically by the pattern
 --   synonym)
 -- * 'Disabled': constructor disabled (annotation type is 'Void' and no pattern
 --   synonym generated)
