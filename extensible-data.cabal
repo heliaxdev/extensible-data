@@ -10,6 +10,12 @@ author: Andy Morris <andy@cryptium.ch>
 maintainer: Andy Morris <andy@cryptium.ch>
 
 
+flag dump-splices
+  description: Show the results of splices in the examples
+  default: True
+  manual: True
+
+
 common deps
   default-language: Haskell2010
   build-depends:
@@ -19,24 +25,10 @@ common deps
   ghc-options:
     -Wall
 
-flag dump-splices
-  description: Show the results of splices in the examples
-  default: True
-  manual: True
-
-flag recomp-examples
-  description:
-    Always recompile the examples (to see the splices each time); ignored if
-    flag(dumps-splices) is false
-  default: False
-  manual: True
-
 common example
   build-depends: extensible-data
   if flag(dump-splices)
     ghc-options: -ddump-splices
-    if flag(recomp-examples)
-      ghc-options: -fforce-recomp
 
 library
   import: deps
