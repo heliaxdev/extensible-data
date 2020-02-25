@@ -102,7 +102,7 @@ module Extensible
   (-- * Name manipulation
    NameAffix (.., NamePrefix, NameSuffix), applyAffix,
    -- * Generating extensible datatypes
-   extensible, extensibleWith, Config (..), ConAnn(..))
+   extensible, extensibleWith, Config (..), defaultConfig, ConAnn(..))
 where
 
 import Language.Haskell.TH
