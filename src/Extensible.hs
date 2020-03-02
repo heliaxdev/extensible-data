@@ -281,18 +281,26 @@ extensible = extensibleWith defaultConfig
 -- function spits out.
 extensibleWith :: Config -> DecsQ -> DecsQ
 extensibleWith conf ds =
-    fmap concat . traverse (makeExtensible conf <=< simpleData) =<< ds
+    makeExtensible conf =<< traverse simpleData =<< ds
 
 tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
 
-makeExtensible :: Config -> SimpleData -> DecsQ
-makeExtensible conf (SimpleData name tvs cs) = do
+makeExtensible :: Config -> [SimpleData] -> DecsQ
+makeExtensible conf datas =
+  let nameMap = [(name, applyAffix (datatypeName conf) name)
+                  | SimpleData name _ _ <- datas]
+  in concat <$> mapM (makeExtensible1 conf nameMap) datas
+
+makeExtensible1 :: Config
+                -> [(Name, Name)] -- ^ mapping @(old, new)@ for datatype names
+                -> SimpleData -> DecsQ
+makeExtensible1 conf nameMap (SimpleData name tvs cs) = do
   let name' = applyAffix (datatypeName conf) name
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
-  cs' <- traverse (extendCon conf name name' ext tvs) cs
+  cs' <- traverse (extendCon conf nameMap ext tvs) cs
   let cx = extensionCon conf name ext tvs
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
@@ -316,25 +324,23 @@ appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 -- | Generate an extended constructor by renaming it and replacing recursive
 -- occrences of the datatype.
 extendCon :: Config
-          -> Name -- ^ original datatype name
-          -> Name -- ^ new datatype name
+          -> [(Name, Name)] -- ^ original & new datatype names
           -> Name -- ^ new type variable name
           -> [TyVarBndr] -- ^ original type variables
           -> SimpleCon -> ConQ
-extendCon conf dname dname' ext tvs (SimpleCon name fields) = do
+extendCon conf nameMap ext tvs (SimpleCon name fields) = do
   let name' = applyAffix (constructorName conf) name
       xname = applyAffix (annotationName conf) name
-      fields' = map (extendRec dname dname' ext) fields
+      fields' = map (extendRec nameMap ext) fields
   pure $ NormalC name' $
     fields' ++ [(strict, appExtTvs (ConT xname) ext tvs)]
 
 -- | Replaces recursive occurences of the datatype with the new one.
-extendRec :: Name -- ^ original type name
-          -> Name -- ^ new type name
+extendRec :: [(Name, Name)] -- ^ original & new datatype names
           -> Name -- ^ new type variable name
           -> BangType -> BangType
-extendRec dname dname' ext = everywhere $ mkT go where
-  go (ConT k) | k == dname = ConT dname' `AppT` VarT ext
+extendRec nameMap ext = everywhere $ mkT go where
+  go (ConT k) | Just new <- lookup k nameMap = ConT new `AppT` VarT ext
   go t = t
 
 extensionCon :: Config -> Name -> Name -> [TyVarBndr] -> Con
