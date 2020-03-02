@@ -10,6 +10,13 @@ author: Andy Morris <andy@cryptium.ch>
 maintainer: Andy Morris <andy@cryptium.ch>
 
 
+flag build-examples
+  description:
+    Whether to build the examples (off by default so they don't get
+    accidentally installed)
+  default: False
+  manual: True
+
 flag dump-splices
   description: Show the results of splices in the examples
   default: True
@@ -29,6 +36,8 @@ common example
   build-depends: extensible-data
   if flag(dump-splices)
     ghc-options: -ddump-splices
+  if !flag(build-examples)
+    buildable: False
 
 library
   import: deps
@@ -41,3 +50,9 @@ executable example1
   hs-source-dirs: examples
   main-is: Example1.hs
   other-modules: Example1Base
+
+executable mutual
+  import: deps, example
+  hs-source-dirs: examples
+  main-is: Mutual.hs
+  other-modules: MutualBase
