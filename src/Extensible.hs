@@ -1,5 +1,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE DeriveLift, PatternSynonyms, StandaloneDeriving, TemplateHaskell #-}
+{-# LANGUAGE
+    CPP, DeriveLift, PatternSynonyms, StandaloneDeriving, TemplateHaskell
+  #-}
 
 -- | #maindoc#
 -- Generates an extensible datatype from a datatype declaration, roughly
@@ -460,8 +462,15 @@ decsForCon conf extsName tvs (SimpleCon name fields) = do
       typeC = varE $ applyAffix (extRecTypeName conf) name
       nameC = varE $ applyAffix (extRecNameName conf) name
       exts  = varE extsName
-  [|let tfHead = foldl appT (conT tyfam) $ map varT (extsName : tvs')
-        mkTf rhs = tySynInstD (tySynEqn Nothing tfHead rhs)
+  [|let
+#if MIN_VERSION_template_haskell(2,15,0)
+        mkTf rhs = tySynInstD $
+          tySynEqn Nothing
+            (foldl appT (conT tyfam) $ map varT (extsName : tvs'))
+            rhs
+#else
+        mkTf rhs = tySynInstD tyfam $ tySynEqn (map varT (extsName : tvs')) rhs
+#endif
         annType = $typeC $exts; patName = mkName $ $nameC $exts
         mkPatSyn args' rhs = patSynD patName (prefixPatSyn args') implBidir rhs
     in
@@ -491,9 +500,14 @@ decsForExt conf extsName tvs name = do
           ts -> foldr1 mkEither $ map (appArgs . snd) ts
           where mkEither t u = conT $(lift ''Either) `appT` t `appT` u
                 appArgs t = $(appsE $ [|t|] : map (\x -> [|varT x|]) args)
+#if MIN_VERSION_template_haskell(2,15,0)
         tySyn = tySynInstD $ tySynEqn Nothing
           (foldl appT (conT tyfam) (map varT (extsName : args)))
           tySynRhs
+#else
+        tySyn = tySynInstD tyfam $
+          tySynEqn (map varT (extsName : args)) tySynRhs
+#endif
         mkPatSyn mkRhs (patName, _) = do
           x <- newName "x"
           patSynD (mkName patName) (prefixPatSyn [x]) implBidir (mkRhs (varP x))
