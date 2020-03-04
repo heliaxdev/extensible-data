@@ -1,7 +1,4 @@
-{-# LANGUAGE
-    TemplateHaskell, TypeFamilies, PatternSynonyms,
-    FlexibleInstances, TypeSynonymInstances, StandaloneDeriving
-  #-}
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, StandaloneDeriving #-}
 import BasicBase
 
 data NoExt

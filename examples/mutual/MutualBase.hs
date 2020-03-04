@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell, TypeFamilies #-}
 module MutualBase where
 import Extensible
 
