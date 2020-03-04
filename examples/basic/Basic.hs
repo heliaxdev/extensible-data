@@ -2,8 +2,7 @@
     TemplateHaskell, TypeFamilies, PatternSynonyms,
     FlexibleInstances, TypeSynonymInstances, StandaloneDeriving
   #-}
-{-# OPTIONS_GHC -Wno-missing-pattern-synonym-signatures #-}
-import Example1Base
+import BasicBase
 
 data NoExt
 

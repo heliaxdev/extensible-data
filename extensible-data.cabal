@@ -45,14 +45,14 @@ library
   exposed-modules:
     Extensible
 
-executable example1
+executable basic
   import: deps, example
-  hs-source-dirs: examples
-  main-is: Example1.hs
-  other-modules: Example1Base
+  hs-source-dirs: examples/basic
+  main-is: Basic.hs
+  other-modules: BasicBase
 
 executable mutual
   import: deps, example
-  hs-source-dirs: examples
+  hs-source-dirs: examples/mutual
   main-is: Mutual.hs
   other-modules: MutualBase

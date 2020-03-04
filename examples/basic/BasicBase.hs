@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, TypeFamilies #-}
-module Example1Base where
+module BasicBase where
 
 import Extensible
 import Language.Haskell.TH
