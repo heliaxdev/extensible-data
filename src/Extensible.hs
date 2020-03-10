@@ -539,7 +539,8 @@ decsForExt conf home extsName tvs name = do
 #endif
         mkPatSyn mkRhs (patName, _) = do
           x <- newName "x"
-          patSynD (mkName patName) (prefixPatSyn [x]) implBidir (mkRhs (varP x))
+          patSynD (mkName patName) (prefixPatSyn [x]) implBidir
+            (conP cname [mkRhs (varP x)])
     in
     tySyn : zipWith mkPatSyn (makeEithers (length typs)) typs|]
 
