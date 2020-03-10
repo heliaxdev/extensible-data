@@ -58,3 +58,9 @@ executable mutual
   hs-source-dirs: examples/mutual
   main-is: Mutual.hs
   other-modules: MutualBase
+
+executable qualified
+  import: deps, example
+  hs-source-dirs: examples/qualified
+  main-is: Qualified.hs
+  other-modules: QualifiedBase

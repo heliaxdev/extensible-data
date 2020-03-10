@@ -178,6 +178,18 @@ applyAffix :: NameAffix -> Name -> Name
 applyAffix (NameAffix pre suf) = onNameBase (\b -> pre ++ b ++ suf)
 
 
+-- | Qualified a name with a module, /unless/ it is already qualified.
+--
+-- >>> qualifyWith "Mod" (mkName "foo")
+-- Mod.foo
+-- >>> qualifyWith "Mod" (mkName "OtherMod.foo")
+-- OtherMod.foo
+qualifyWith :: String -> Name -> Name
+qualifyWith m n = case nameModule n of
+  Nothing -> mkName (m ++ "." ++ nameBase n)
+  Just _  -> n
+
+
 -- | Configuration options for how to name the generated constructors, type
 -- families, etc.
 data Config = Config {
@@ -282,23 +294,28 @@ extensible = extensibleWith defaultConfig
 -- names. See <#maindoc the module documentation> for more detail on what this
 -- function spits out.
 extensibleWith :: Config -> DecsQ -> DecsQ
-extensibleWith conf ds =
-    makeExtensible conf =<< traverse simpleData =<< ds
+extensibleWith conf ds = do
+  ds'  <- traverse simpleData =<< ds
+  home <- loc_module <$> location
+  makeExtensible conf home ds'
 
 tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
 
-makeExtensible :: Config -> [SimpleData] -> DecsQ
-makeExtensible conf datas =
+makeExtensible :: Config
+               -> String -- ^ module where @extensible{With}@ was called
+               -> [SimpleData] -> DecsQ
+makeExtensible conf home datas =
   let nameMap = [(name, applyAffix (datatypeName conf) name)
                   | SimpleData name _ _ <- datas]
-  in concat <$> mapM (makeExtensible1 conf nameMap) datas
+  in concat <$> mapM (makeExtensible1 conf home nameMap) datas
 
 makeExtensible1 :: Config
+                -> String -- ^ module where @extensible{With}@ was called
                 -> [(Name, Name)] -- ^ mapping @(old, new)@ for datatype names
                 -> SimpleData -> DecsQ
-makeExtensible1 conf nameMap (SimpleData name tvs cs) = do
+makeExtensible1 conf home nameMap (SimpleData name tvs cs) = do
   let name' = applyAffix (datatypeName conf) name
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
@@ -308,7 +325,7 @@ makeExtensible1 conf nameMap (SimpleData name tvs cs) = do
   efx <- extensionFam conf name tvs
   (rname, fcnames, fname, rec) <- extRecord conf name tvs cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
-  (_ename, extFun) <- makeExtender conf name rname tvs cs
+  (_ename, extFun) <- makeExtender conf home name rname tvs cs
   return $
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
     efs ++ [efx, rec] ++ defRec ++ extFun
@@ -426,41 +443,52 @@ extRecDefault conf rname fcnames fname = do
 
 -- | Generate the @extendX@ function, which is used to generate extended
 -- versions of @X@
-makeExtender :: Config -> Name -> Name -> [TyVarBndr] -> [SimpleCon]
-             -> Q (Name, [Dec])
-makeExtender conf name rname tvs cs = do
-  let ename = applyAffix (extFunName conf) name
+makeExtender :: Config
+             -> String -- ^ module where @extensible@ was called
+             -> Name -- ^ datatype name
+             -> Name -- ^ extension record name
+             -> [TyVarBndr] -> [SimpleCon] -> Q (Name, [Dec])
+makeExtender conf home name' rname' tvs cs = do
+  let name  = qualifyWith home name'
+      rname = qualifyWith home rname'
+      ename = applyAffix (extFunName conf) name'
   sig  <- sigD ename [t|String -> TypeQ -> $(conT rname) -> DecsQ|]
   syn  <- newName "syn"
   tag  <- newName "tag"
   exts <- newName "exts"
   defn <- [|sequence $ concat $(listE $
-              map (decsForCon conf exts tvs) cs ++
-              [decsForExt conf exts tvs name,
-               makeTySyn conf name syn tag,
+              map (decsForCon conf home exts tvs) cs ++
+              [decsForExt conf home exts tvs name,
+               makeTySyn conf home name syn tag,
                completePrag conf exts cs name])|]
   let val = FunD ename [Clause [VarP syn, VarP tag, VarP exts] (NormalB defn) []]
   pure (ename, [sig, val])
 
 -- | Generates a type synonym for an extensible datatype applied to a specific
 -- extension type, like @type Foo = Foo' Ext1@.
-makeTySyn :: Config -> Name -> Name -> Name -> ExpQ
-makeTySyn conf name syn tag =
-  let tyname = applyAffix (datatypeName conf) name in
+makeTySyn :: Config
+          -> String -- ^ module where @extensible@ was called
+          -> Name -- ^ datatype name
+          -> Name -- ^ variable containing synonym's name
+          -> Name -- ^ variable containing tag type
+          -> ExpQ
+makeTySyn conf home name syn tag =
+  let tyname = qualifyWith home $ applyAffix (datatypeName conf) name in
   [|[tySynD (mkName $(varE syn)) [] (appT (conT tyname) $(varE tag))]|]
 
 -- | Generates the type instance and pattern synonym (if any) for a constructor.
 decsForCon :: Config
+           -> String -- ^ module where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
            -> [TyVarBndr] -> SimpleCon -> ExpQ
-decsForCon conf extsName tvs (SimpleCon name fields) = do
+decsForCon conf home extsName tvs (SimpleCon name fields) = do
   tvs' <- replicateM (length tvs) (newName "a")
   ann  <- newName "ann"
   args <- replicateM (length fields) (newName "x")
-  let tyfam = applyAffix (annotationName conf) name
-      name' = applyAffix (constructorName conf) name
-      typeC = varE $ applyAffix (extRecTypeName conf) name
-      nameC = varE $ applyAffix (extRecNameName conf) name
+  let tyfam = qualifyWith home $ applyAffix (annotationName conf) name
+      name' = qualifyWith home $ applyAffix (constructorName conf) name
+      typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
+      nameC = varE $ qualifyWith home $ applyAffix (extRecNameName conf) name
       exts  = varE extsName
   [|let
 #if MIN_VERSION_template_haskell(2,15,0)
@@ -487,9 +515,10 @@ decsForCon conf extsName tvs (SimpleCon name fields) = do
 
 -- | Generates the type instance and pattern synonym(s) for the extension.
 decsForExt :: Config
+           -> String -- ^ module where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
            -> [TyVarBndr] -> Name -> ExpQ
-decsForExt conf extsName tvs name = do
+decsForExt conf home extsName tvs name = do
   args <- replicateM (length tvs) (newName "a")
   let typeC = varE $ applyAffix (extRecTypeName <> extensionName $ conf) name
       tyfam = applyAffix (extensionName conf) name
