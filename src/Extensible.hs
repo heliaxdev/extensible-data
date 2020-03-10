@@ -570,7 +570,7 @@ completePrag conf extsName cs name =
    |]
 
 -- | Generates a list of functions which wrap patterns in successive branches of
--- right-nested 'Eithers'. For example, @makeEithers 4@ produces:
+-- right-nested 'Either's. For example, @makeEithers 4@ produces:
 --
 -- @
 -- [\p -> [p|Left $p|],
