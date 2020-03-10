@@ -520,7 +520,9 @@ decsForExt :: Config
            -> [TyVarBndr] -> Name -> ExpQ
 decsForExt conf home extsName tvs name = do
   args <- replicateM (length tvs) (newName "a")
-  let typeC = varE $ applyAffix (extRecTypeName <> extensionName $ conf) name
+  let cname' = applyAffix (extensionName conf) name
+      cname  = qualifyWith home cname'
+      typeC = varE $ applyAffix (extRecTypeName conf) cname'
       tyfam = applyAffix (extensionName conf) name
       exts  = varE extsName
   [|let typs = $typeC $exts
