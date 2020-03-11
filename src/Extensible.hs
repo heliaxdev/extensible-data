@@ -457,8 +457,8 @@ makeExtender conf home name' rname' tvs cs = do
   tag  <- newName "tag"
   exts <- newName "exts"
   defn <- [|sequence $ concat $(listE $
-              map (decsForCon conf home exts tvs) cs ++
-              [decsForExt conf home exts tvs name,
+              map (decsForCon conf home exts tag tvs) cs ++
+              [decsForExt conf home exts tag tvs name,
                makeTySyn conf home name syn tag,
                completePrag conf exts cs name])|]
   let val = FunD ename [Clause [VarP syn, VarP tag, VarP exts] (NormalB defn) []]
@@ -480,8 +480,9 @@ makeTySyn conf home name syn tag =
 decsForCon :: Config
            -> String -- ^ module where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
+           -> Name -- ^ name of the bound @tag@ variable in @extendX@
            -> [TyVarBndr] -> SimpleCon -> ExpQ
-decsForCon conf home extsName tvs (SimpleCon name fields) = do
+decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
   tvs' <- replicateM (length tvs) (newName "a")
   ann  <- newName "ann"
   args <- replicateM (length fields) (newName "x")
@@ -489,15 +490,15 @@ decsForCon conf home extsName tvs (SimpleCon name fields) = do
       name' = qualifyWith home $ applyAffix (constructorName conf) name
       typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
       nameC = varE $ qualifyWith home $ applyAffix (extRecNameName conf) name
-      exts  = varE extsName
+      exts  = varE extsName; tag = varE tagName
   [|let
 #if MIN_VERSION_template_haskell(2,15,0)
         mkTf rhs = tySynInstD $
           tySynEqn Nothing
-            (foldl appT (conT tyfam) $ map varT (extsName : tvs'))
+            (foldl appT (conT tyfam) $ $tag : map varT tvs')
             rhs
 #else
-        mkTf rhs = tySynInstD tyfam $ tySynEqn (map varT (extsName : tvs')) rhs
+        mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : map varT tvs') rhs
 #endif
         annType = $typeC $exts; patName = mkName $ $nameC $exts
         mkPatSyn args' rhs = patSynD patName (prefixPatSyn args') implBidir rhs
@@ -517,14 +518,15 @@ decsForCon conf home extsName tvs (SimpleCon name fields) = do
 decsForExt :: Config
            -> String -- ^ module where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
+           -> Name -- ^ name of the bound @tag@ variable in @extendX@
            -> [TyVarBndr] -> Name -> ExpQ
-decsForExt conf home extsName tvs name = do
+decsForExt conf home extsName tagName tvs name = do
   args <- replicateM (length tvs) (newName "a")
   let cname' = applyAffix (extensionName conf) name
       cname  = qualifyWith home cname'
       typeC = varE $ applyAffix (extRecTypeName conf) cname'
       tyfam = applyAffix (extensionName conf) name
-      exts  = varE extsName
+      exts  = varE extsName; tag = varE tagName
   [|let typs = $typeC $exts
         tySynRhs = case typs of
           [] -> conT $(lift ''Void)
@@ -533,11 +535,11 @@ decsForExt conf home extsName tvs name = do
                 appArgs t = $(appsE $ [|t|] : map (\x -> [|varT x|]) args)
 #if MIN_VERSION_template_haskell(2,15,0)
         tySyn = tySynInstD $ tySynEqn Nothing
-          (foldl appT (conT tyfam) (map varT (extsName : args)))
+          (foldl appT (conT tyfam) ($tag : map varT args))
           tySynRhs
 #else
         tySyn = tySynInstD tyfam $
-          tySynEqn (map varT (extsName : args)) tySynRhs
+          tySynEqn ($tag : map varT args) tySynRhs
 #endif
         mkPatSyn mkRhs (patName, _) = do
           x <- newName "x"
