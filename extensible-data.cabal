@@ -64,3 +64,9 @@ executable qualified
   hs-source-dirs: examples/qualified
   main-is: Qualified.hs
   other-modules: QualifiedBase
+
+executable param
+  import: deps, example
+  hs-source-dirs: examples/param
+  main-is: Param.hs
+  other-modules: ParamBase

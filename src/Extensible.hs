@@ -82,10 +82,11 @@
 --   }
 --
 -- extendFoo :: 'String' -- ^ Type alias name  #extendFoo#
+--           -> ['Name'] -- ^ Extra type variables
 --           -> 'TypeQ'  -- ^ Tag for this annotation
 --           -> <#ExtFoo ExtFoo>
 --           -> 'DecsQ'
--- extendFoo name tag exts = ...
+-- extendFoo name vars tag exts = ...
 -- @
 --
 -- @
@@ -94,7 +95,7 @@
 --
 -- data QZ #QZ#
 --
--- <#extendFoo extendFoo> \"Foo\" [t|<#QZ QZ>|] $ <#defaultExtFoo defaultExtFoo> {
+-- <#extendFoo extendFoo> \"Foo\" [] [t|<#QZ QZ>|] $ <#defaultExtFoo defaultExtFoo> {
 --   <#typeBar typeBar> = 'Nothing',  -- disable Bar
 --   <#typeFooX typeFooX> =          -- add two new constructors, Quux and Zoop
 --     [(\"Quux\", \\_ -> [t|'Int'|]),
@@ -122,9 +123,37 @@
 --
 -- {-\# COMPLETE <#Baz Baz>, <#Quux Quux>, <#Zoop Zoop> #-}
 -- @
+--
+-- @
+-- data BarWith b #BarWith#
+--
+-- do
+--   bn <- 'newName' "b"
+--   let b = 'varT' bn
+--   <#extendFoo extendFoo> \"Foo\" [bn] [t|<#BarWith BarWith> $b|] $
+--     <#defaultExtFoo defaultExtFoo> { typeBar = 'Ann' b }
+--
+-- ====>
+--
+-- type instance <#XBar XBar> (<#BarWith BarWith> b) a = b
+-- type instance <#XBaz XBaz> (<#BarWith BarWith> b) a = ()
+-- type instance <#FooX FooX> (<#BarWith BarWith> b) a = 'Either' 'Int' 'Bool'
+--
+-- type Foo b = <#Foo' Foo'> (<#BarWith BarWith> b) #Foo2#
+--
+-- pattern Bar :: a -> b -> <#Foo2 Foo> b a #Bar2#
+-- pattern Bar x y = <#Bar' Bar'> x y
+--
+-- pattern Baz :: <#Foo Foo> a -> <#Foo Foo> 'Int' -> <#Foo Foo> a #Baz2#
+-- pattern Baz x y = <#Baz' Baz'> x y ()
+--
+-- {-\# COMPLETE <#Bar2 Bar>, <#Baz2 Baz> #-}
+-- @
 module Extensible
   (-- * Name manipulation
    NameAffix (.., NamePrefix, NameSuffix), applyAffix,
+   -- ** Template Haskell re-exports
+   newName, varT,
    -- * Generating extensible datatypes
    extensible, extensibleWith, Config (..), defaultConfig, ConAnn(..))
 where
@@ -445,36 +474,41 @@ extRecDefault conf rname fcnames fname = do
 -- versions of @X@
 makeExtender :: Config
              -> String -- ^ module where @extensible@ was called
-             -> Name -- ^ datatype name
-             -> Name -- ^ extension record name
+             -> Name   -- ^ datatype name
+             -> Name   -- ^ extension record name
              -> [TyVarBndr] -> [SimpleCon] -> Q (Name, [Dec])
 makeExtender conf home name' rname' tvs cs = do
   let name  = qualifyWith home name'
       rname = qualifyWith home rname'
       ename = applyAffix (extFunName conf) name'
-  sig  <- sigD ename [t|String -> TypeQ -> $(conT rname) -> DecsQ|]
+  sig  <- sigD ename [t|String -> [Name] -> TypeQ -> $(conT rname) -> DecsQ|]
   syn  <- newName "syn"
+  vars <- newName "vars"
   tag  <- newName "tag"
   exts <- newName "exts"
   defn <- [|sequence $ concat $(listE $
               map (decsForCon conf home exts tag tvs) cs ++
               [decsForExt conf home exts tag tvs name,
-               makeTySyn conf home name syn tag,
+               makeTySyn conf home name syn vars tag,
                completePrag conf exts cs name])|]
-  let val = FunD ename [Clause [VarP syn, VarP tag, VarP exts] (NormalB defn) []]
+  let val = FunD ename
+        [Clause (map VarP [syn, vars, tag, exts]) (NormalB defn) []]
   pure (ename, [sig, val])
 
 -- | Generates a type synonym for an extensible datatype applied to a specific
 -- extension type, like @type Foo = Foo' Ext1@.
 makeTySyn :: Config
           -> String -- ^ module where @extensible@ was called
-          -> Name -- ^ datatype name
-          -> Name -- ^ variable containing synonym's name
-          -> Name -- ^ variable containing tag type
+          -> Name   -- ^ datatype name
+          -> Name   -- ^ variable containing synonym's name
+          -> Name   -- ^ variable containing extension's extra type arguments
+          -> Name   -- ^ variable containing tag type
           -> ExpQ
-makeTySyn conf home name syn tag =
+makeTySyn conf home name syn vars tag =
   let tyname = qualifyWith home $ applyAffix (datatypeName conf) name in
-  [|[tySynD (mkName $(varE syn)) [] (appT (conT tyname) $(varE tag))]|]
+  [|[tySynD (mkName $(varE syn))
+            (map plainTV $(varE vars))
+            (appT (conT tyname) $(varE tag))]|]
 
 -- | Generates the type instance and pattern synonym (if any) for a constructor.
 decsForCon :: Config

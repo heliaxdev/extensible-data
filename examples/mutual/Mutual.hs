@@ -3,11 +3,11 @@ import MutualBase
 
 data Ext
 
-extendA "A" [t|Ext|] defaultExtA {
+extendA "A" [] [t|Ext|] defaultExtA {
   typeAX = [("AI", [t|Int|])]
 }
 
-extendB "B" [t|Ext|] defaultExtB {
+extendB "B" [] [t|Ext|] defaultExtB {
   typeBA = Ann [t|String|]
 }
 

@@ -3,7 +3,7 @@ import BasicBase
 
 data NoExt
 
-extendA "A" [t|NoExt|] defaultExtA
+extendA "A" [] [t|NoExt|] defaultExtA
 
 deriving instance Show a => Show (A a)
 
