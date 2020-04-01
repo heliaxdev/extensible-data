@@ -64,6 +64,12 @@
 --   | Baz' (<#Foo' Foo'> ext a) (<#Foo' Foo'> ext 'Int') !(<#XBaz XBaz> ext a) #Baz'#
 --   | FooX !(<#FooX FooX> ext a) #FooX#
 --
+-- -- ('K.Type' from "Data.Kind", not from TH!)
+-- type FooAll (c :: 'K.Type' -> 'Constraint') ext a = #FooAll#
+--   (c (<#XBar XBar> ext a),
+--    c (<#XBaz XBaz> ext a),
+--    c (<#FooX FooX> ext a))
+--
 -- data ExtFoo = ExtFoo { #ExtFoo#
 --     nameBar  :: 'String',                        #nameBar#
 --     typeBar  :: 'Maybe' ('TypeQ' -> 'TypeQ'),    #typeBar#
@@ -158,12 +164,13 @@ module Extensible
    extensible, extensibleWith, Config (..), defaultConfig, ConAnn(..))
 where
 
-import Language.Haskell.TH
+import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
 import Generics.SYB (everywhere, mkT)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
+import Data.Kind as K
 
 -- ☹
 deriving instance Lift Name
@@ -224,8 +231,10 @@ qualifyWith m n = case nameModule n of
 data Config = Config {
     -- | Applied to input datatype's name to get extensible type's name
     datatypeName :: NameAffix,
-    -- | Appled to input constructor names to get extensible constructor names
+    -- | Applied to input constructor names to get extensible constructor names
     constructorName :: NameAffix,
+    -- | Applied to type name to get constraint bundle name
+    bundleName :: NameAffix,
     -- | Appled to constructor names to get the annotation type family's name
     annotationName :: NameAffix,
     -- | Applied to datatype name to get extension constructor & type family's
@@ -252,6 +261,7 @@ data Config = Config {
 -- Config {
 --   datatypeName    = NameSuffix \"'\",
 --   constructorName = NameSuffix \"'\",
+--   bundleName      = NameSuffix "All",
 --   annotationName  = NamePrefix \"X\",
 --   extensionName   = NameSuffix \"X\",
 --   extRecordName   = NamePrefix \"Ext\",
@@ -265,6 +275,7 @@ defaultConfig :: Config
 defaultConfig = Config {
     datatypeName    = NameSuffix "'",
     constructorName = NameSuffix "'",
+    bundleName      = NameSuffix "All",
     annotationName  = NamePrefix "X",
     extensionName   = NameSuffix "X",
     extRecordName   = NamePrefix "Ext",
@@ -352,12 +363,13 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs) = do
   let cx = extensionCon conf name ext tvs
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
+  bnd <- constraintBundle conf name ext tvs cs
   (rname, fcnames, fname, rec) <- extRecord conf name tvs cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
   return $
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
-    efs ++ [efx, rec] ++ defRec ++ extFun
+    efs ++ [efx, bnd, rec] ++ defRec ++ extFun
 
 nonstrict :: Bang
 nonstrict = Bang NoSourceUnpackedness NoSourceStrictness
@@ -366,7 +378,7 @@ strict :: Bang
 strict = Bang NoSourceUnpackedness SourceStrict
 
 -- | @appExtTvs t ext tvs@ applies @t@ to @ext@ and then to all of @tvs@.
-appExtTvs :: Type -> Name -> [TyVarBndr] -> Type
+appExtTvs :: TH.Type -> Name -> [TyVarBndr] -> TH.Type
 appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 
 -- | Generate an extended constructor by renaming it and replacing recursive
@@ -403,6 +415,24 @@ extendFam conf tvs (SimpleCon name _) =
 extensionFam :: Config -> Name -> [TyVarBndr] -> DecQ
 extensionFam conf name tvs =
   extendFam' (applyAffix (extensionName conf) name) tvs
+
+constraintBundle :: Config
+                 -> Name -- ^ datatype name
+                 -> Name -- ^ extension type variable name
+                 -> [TyVarBndr]
+                 -> [SimpleCon] -> DecQ
+constraintBundle conf name ext tvs cs = do
+  c <- newName "c"
+  ckind <- [t|K.Type -> Constraint|]
+  let cnames = map scName cs
+      aname  = applyAffix (bundleName conf) name
+      tvs'   = kindedTV c ckind : plainTV ext : tvs
+      con1 n = varT c `appT`
+               foldl appT (conT n) (varT ext : map (varT . tyvarName) tvs)
+      tupled ts = foldl appT (tupleT (length ts)) ts
+  tySynD aname tvs' $ tupled $ map con1 $
+    map (applyAffix $ annotationName conf) cnames ++
+    [applyAffix (extensionName conf) name]
 
 extendFam' :: Name -> [TyVarBndr] -> DecQ
 extendFam' name tvs = do

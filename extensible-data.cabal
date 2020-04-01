@@ -34,7 +34,8 @@ common deps
 
 common example
   build-depends: extensible-data
-  default-extensions: TemplateHaskell, TypeFamilies, PatternSynonyms
+  default-extensions:
+    TemplateHaskell, TypeFamilies, PatternSynonyms, ConstraintKinds
   ghc-options: -Wno-unused-top-binds -Wno-missing-pattern-synonym-signatures
   if flag(dump-splices)
     ghc-options: -ddump-splices
