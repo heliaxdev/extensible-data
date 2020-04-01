@@ -7,8 +7,10 @@ extendA "A" [] [t|T|] $ defaultExtA {
     typeA = Ann $ \a -> [t| [$a] |]
   }
 
+extendB "B" [] [t|T|] $ defaultExtB
+
 main = print $
-  A "" 5 ["a", "b"] ==
-  (A "" 5 ["a", "b", "c"] :: A String)
+  (A (B "") 5 ["a", "b"]) ==
+  (A (B "") 5 ["a", "b", "c"] :: A String)
     -- annotation needed until pattern synonyms have
     -- type signatures :/

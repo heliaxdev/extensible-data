@@ -404,8 +404,9 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   let cx = extensionCon conf name ext tvs
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
-  (bname, bnd) <- constraintBundle conf name ext tvs cs
-  insts <- fmap concat $ traverse (makeInstances name' bname ext tvs) derivs
+  bnd <- constraintBundle conf name ext tvs cs
+  insts <- fmap concat $
+    traverse (makeInstances conf name' (map fst nameMap) ext tvs) derivs
   (rname, fcnames, fname, rec) <- extRecord conf name tvs cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
@@ -461,39 +462,41 @@ extensionFam conf name tvs =
 constraintBundle :: Config
                  -> Name -- ^ datatype name
                  -> Name -- ^ extension type variable name
-                 -> [TyVarBndr] -> [SimpleCon] -> Q (Name, Dec)
+                 -> [TyVarBndr] -> [SimpleCon] -> DecQ
 constraintBundle conf name ext tvs cs = do
   c <- newName "c"
   ckind <- [t|K.Type -> Constraint|]
   let cnames = map scName cs
-      aname  = applyAffix (bundleName conf) name
+      bname  = applyAffix (bundleName conf) name
       tvs'   = kindedTV c ckind : plainTV ext : tvs
       con1 n = varT c `appT`
                foldl appT (conT n) (varT ext : map (varT . tyvarName) tvs)
       tupled ts = foldl appT (tupleT (length ts)) ts
-  d <- tySynD aname tvs' $ tupled $ map con1 $
+  tySynD bname tvs' $ tupled $ map con1 $
     map (applyAffix $ annotationName conf) cnames ++
     [applyAffix (extensionName conf) name]
-  pure (aname, d)
 
-makeInstances :: Name -- ^ name of the __output__ datatype
-              -> Name -- ^ name of the constraint bundle
-              -> Name -- ^ extension type variable name
+makeInstances :: Config
+              -> Name   -- ^ name of the __output__ datatype
+              -> [Name] -- ^ names of all datatypes in this group
+              -> Name   -- ^ extension type variable name
               -> [TyVarBndr]
               -> SimpleDeriv
               -> DecsQ
-makeInstances name bname ext tvs (SimpleDeriv strat prds) =
+makeInstances conf name names ext tvs (SimpleDeriv strat prds) =
   pure $ map make1 prds
  where
-  make1 :: Pred -> Dec
   make1 prd = StandaloneDerivD strat'
-    (map (AppT prd . VarT . tyvarName) tvs
-      ++ [appExtTvs (ConT bname `AppT` prd) ext tvs])
+    (map tvPred tvs ++ map allPred names)
     (prd `AppT` appExtTvs (ConT name) ext tvs)
-  strat' = case strat of
-    SBlank    -> Nothing
-    SStock    -> Just StockStrategy
-    SAnyclass -> Just AnyclassStrategy
+   where
+    tvPred = AppT prd . VarT . tyvarName
+    allPred name' = appExtTvs (ConT bname `AppT` prd) ext tvs
+      where bname = applyAffix (bundleName conf) name'
+    strat' = case strat of
+      SBlank    -> Nothing
+      SStock    -> Just StockStrategy
+      SAnyclass -> Just AnyclassStrategy
 
 extendFam' :: Name -> [TyVarBndr] -> DecQ
 extendFam' name tvs = do
