@@ -9,6 +9,13 @@ license: GPL-3.0-or-later
 author: Andy Morris <andy@cryptium.ch>
 maintainer: Andy Morris <andy@cryptium.ch>
 
+homepage: https://cryptiumlabs.github.io/extensible-data
+bug-reports: https://github.com/cryptiumlabs/extensible-data/issues
+
+source-repository head
+  type: git
+  location: git://github.com/cryptiumlabs/extensible-data.git
+
 
 flag build-examples
   description:
