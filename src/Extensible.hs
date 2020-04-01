@@ -12,16 +12,31 @@
 -- * A type family is generated for each constructor, taking an argument named
 --   @ext@ for the extension type, followed by the arguments of the datatype.
 --   The names of the type families correspond to the constructors themselves
---   modified with 'annotationName'.
+--   modified with 'annotationName' (see @<#XBar XBar>@ etc below).
 -- * An extra type family is generated with the same arguments, named after the
---   datatype modified with 'extensionName'.
+--   datatype modified with 'extensionName' (see @<#FooX FooX>@).
 -- * The datatype itself is renamed according to 'datatypeName' and given an
 --   extra argument called @ext@ (before the others).
 -- * Each existing constructor is renamed according to 'constructorName', and
 --   given an extra strict field of the corresponding type family generated
 --   above.
 -- * An extra constructor is generated for the extension type family (with the
---   same name), containing it as its sole field.
+--   same name), containing it as its sole field (see @<#Foo' Foo'>@ for the
+--   transformation).
+-- * A constraint synonym is generated, named according to 'bundleName', which
+--   contains a constraint for each extension (see @<#FooAll FooAll>@).
+-- * A record and TH function are generated for creating new extensions of the
+--   base datatype (see @<#FooExt FooExt>@ and @<#extendFoo extendFoo>@).
+-- * A standalone @deriving@ declaration is generated for each derived instance
+--   listed. __Note that this has some caveats__:
+--
+--     * Only @stock@ and @anyclass@ strategies are supported.
+--     * __The context is not calculated properly like a real deriving clause__.
+--       Instead, a constraint of the given class is required for each type
+--       variable and each extension. If this doesn't work (e.g. you want to
+--       derive 'Eq' but have a type variable of kind @'K.Type' -> 'K.Type'@), you
+--       must instead write your own declaration outside of the call to
+--       'extensible'.
 --
 -- Due to GHC's staging restriction, it is not possible to write
 -- @'extensible' [d| data Foo = ... |]@ and use the generated @extendFoo@
@@ -32,15 +47,17 @@
 --
 -- * @TemplateHaskell@,
 -- * @TypeFamilies@,
--- * @ConstraintKinds@ (TODO), and
--- * @KindSignatures@ (TODO).
+-- * @FlexibleContexts@,
+-- * @UndecidableInstances@,
+-- * @ConstraintKinds@,
+-- * @KindSignatures@, and
+-- * @StandaloneDeriving@.
 --
 -- Modules calling @extendFoo@ need:
 --
 -- * @TemplateHaskell@,
--- * @TypeFamilies@,
--- * @PatternSynonyms@, and
--- * @StandaloneDeriving@ (TODO).
+-- * @TypeFamilies@, and
+-- * @PatternSynonyms@.
 --
 -- You will probably also currently want to disable the warning for missing
 -- @pattern@ type signatures (@-Wno-missing-pattern-synonym-signatures@).
@@ -305,19 +322,34 @@ data SimpleCon = SimpleCon {
 
 -- | A \"simple\" datatype (no context, no kind signature, no deriving)
 data SimpleData = SimpleData {
-    sdName :: Name,
-    sdVars :: [TyVarBndr],
-    sdCons :: [SimpleCon]
+    sdName   :: Name,
+    sdVars   :: [TyVarBndr],
+    sdCons   :: [SimpleCon],
+    sdDerivs :: [SimpleDeriv]
+  } deriving (Eq, Show)
+
+-- 'SBlank' and 'SStock' have the same effect but the first will trigger
+-- @-Wmissing-deriving-strategies@ if it is enabled and the second requires
+-- the @DerivingStrategies@ extension
+data SimpleStrategy = SBlank | SStock | SAnyclass deriving (Eq, Show)
+
+-- | A \"simple\" deriving clause—either @stock@ or @anyclass@ strategy
+data SimpleDeriv =
+  SimpleDeriv {
+    sdStrat   :: SimpleStrategy,
+    dsContext :: Cxt
   } deriving (Eq, Show)
 
 -- | Extract a 'SimpleData' from a 'Dec', if it is a datatype with the given
 -- restrictions.
 simpleData :: Dec -> Q SimpleData
 simpleData (DataD ctx name tvs kind cons derivs)
-  | _:_    <- ctx    = fail "data contexts unsupported"
-  | Just _ <- kind   = fail "kind signatures unsupported"
-  | _:_    <- derivs = fail "deriving unsupported"
-  | otherwise        = SimpleData name tvs <$> traverse simpleCon cons
+  | not $ null ctx    = fail "data contexts unsupported"
+  | Just _ <- kind    = fail "kind signatures unsupported"
+  | otherwise =
+      SimpleData name tvs
+        <$> traverse simpleCon cons
+        <*> traverse simpleDeriv derivs
 simpleData _ = fail "not a datatype"
 
 -- | Extract a 'SimpleCon' from a 'Con', if it is the 'NormalC' case.
@@ -325,6 +357,15 @@ simpleCon :: Con -> Q SimpleCon
 simpleCon (NormalC name fields) = pure $ SimpleCon name fields
 simpleCon _ = fail "only simple constructors supported for now"
 
+simpleDeriv :: DerivClause -> Q SimpleDeriv
+simpleDeriv (DerivClause strat prds) =
+  SimpleDeriv <$> simpleStrat strat <*> pure prds
+ where
+  simpleStrat Nothing                 = pure SBlank
+  simpleStrat (Just StockStrategy)    = pure SStock
+  simpleStrat (Just AnyclassStrategy) = pure SAnyclass
+  simpleStrat (Just NewtypeStrategy)  = fail "newtype deriving unsupported"
+  simpleStrat (Just (ViaStrategy _))  = fail "deriving via unsupported"
 
 -- | As 'extensibleWith', using 'defaultConfig'.
 extensible :: DecsQ -> DecsQ
@@ -348,14 +389,14 @@ makeExtensible :: Config
                -> [SimpleData] -> DecsQ
 makeExtensible conf home datas =
   let nameMap = [(name, applyAffix (datatypeName conf) name)
-                  | SimpleData name _ _ <- datas]
+                  | SimpleData {sdName = name} <- datas]
   in concat <$> mapM (makeExtensible1 conf home nameMap) datas
 
 makeExtensible1 :: Config
                 -> String -- ^ module where @extensible{With}@ was called
                 -> [(Name, Name)] -- ^ mapping @(old, new)@ for datatype names
                 -> SimpleData -> DecsQ
-makeExtensible1 conf home nameMap (SimpleData name tvs cs) = do
+makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   let name' = applyAffix (datatypeName conf) name
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
@@ -363,13 +404,14 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs) = do
   let cx = extensionCon conf name ext tvs
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
-  bnd <- constraintBundle conf name ext tvs cs
+  (bname, bnd) <- constraintBundle conf name ext tvs cs
+  insts <- fmap concat $ traverse (makeInstances name' bname ext tvs) derivs
   (rname, fcnames, fname, rec) <- extRecord conf name tvs cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
   return $
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
-    efs ++ [efx, bnd, rec] ++ defRec ++ extFun
+    efs ++ [efx, bnd] ++ insts ++ [rec] ++ defRec ++ extFun
 
 nonstrict :: Bang
 nonstrict = Bang NoSourceUnpackedness NoSourceStrictness
@@ -419,8 +461,7 @@ extensionFam conf name tvs =
 constraintBundle :: Config
                  -> Name -- ^ datatype name
                  -> Name -- ^ extension type variable name
-                 -> [TyVarBndr]
-                 -> [SimpleCon] -> DecQ
+                 -> [TyVarBndr] -> [SimpleCon] -> Q (Name, Dec)
 constraintBundle conf name ext tvs cs = do
   c <- newName "c"
   ckind <- [t|K.Type -> Constraint|]
@@ -430,9 +471,29 @@ constraintBundle conf name ext tvs cs = do
       con1 n = varT c `appT`
                foldl appT (conT n) (varT ext : map (varT . tyvarName) tvs)
       tupled ts = foldl appT (tupleT (length ts)) ts
-  tySynD aname tvs' $ tupled $ map con1 $
+  d <- tySynD aname tvs' $ tupled $ map con1 $
     map (applyAffix $ annotationName conf) cnames ++
     [applyAffix (extensionName conf) name]
+  pure (aname, d)
+
+makeInstances :: Name -- ^ name of the __output__ datatype
+              -> Name -- ^ name of the constraint bundle
+              -> Name -- ^ extension type variable name
+              -> [TyVarBndr]
+              -> SimpleDeriv
+              -> DecsQ
+makeInstances name bname ext tvs (SimpleDeriv strat prds) =
+  pure $ map make1 prds
+ where
+  make1 :: Pred -> Dec
+  make1 prd = StandaloneDerivD strat'
+    (map (AppT prd . VarT . tyvarName) tvs
+      ++ [appExtTvs (ConT bname `AppT` prd) ext tvs])
+    (prd `AppT` appExtTvs (ConT name) ext tvs)
+  strat' = case strat of
+    SBlank    -> Nothing
+    SStock    -> Just StockStrategy
+    SAnyclass -> Just AnyclassStrategy
 
 extendFam' :: Name -> [TyVarBndr] -> DecQ
 extendFam' name tvs = do

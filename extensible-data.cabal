@@ -42,7 +42,8 @@ common deps
 common example
   build-depends: extensible-data
   default-extensions:
-    TemplateHaskell, TypeFamilies, PatternSynonyms, ConstraintKinds
+    TemplateHaskell, TypeFamilies, PatternSynonyms, ConstraintKinds,
+    StandaloneDeriving, FlexibleContexts, UndecidableInstances
   ghc-options: -Wno-unused-top-binds -Wno-missing-pattern-synonym-signatures
   if flag(dump-splices)
     ghc-options: -ddump-splices -fforce-recomp
@@ -78,3 +79,9 @@ executable param
   hs-source-dirs: examples/param
   main-is: Param.hs
   other-modules: ParamBase
+
+executable deriv
+  import: deps, example
+  hs-source-dirs: examples/deriv
+  main-is: Deriv.hs
+  other-modules: DerivBase
