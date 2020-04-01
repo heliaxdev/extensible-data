@@ -19,7 +19,7 @@ flag build-examples
 
 flag dump-splices
   description: Show the results of splices in the examples
-  default: True
+  default: False
   manual: True
 
 
@@ -38,7 +38,7 @@ common example
     TemplateHaskell, TypeFamilies, PatternSynonyms, ConstraintKinds
   ghc-options: -Wno-unused-top-binds -Wno-missing-pattern-synonym-signatures
   if flag(dump-splices)
-    ghc-options: -ddump-splices
+    ghc-options: -ddump-splices -fforce-recomp
   if !flag(build-examples)
     buildable: False
 
