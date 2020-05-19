@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE
-    CPP, DeriveLift, PatternSynonyms, StandaloneDeriving, TemplateHaskell
+    CPP, DeriveDataTypeable, DeriveLift, PatternSynonyms, StandaloneDeriving,
+    TemplateHaskell
   #-}
 
 -- | #maindoc#
@@ -183,7 +184,7 @@ where
 
 import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
-import Generics.SYB (everywhere, mkT)
+import Generics.SYB (Data, everywhere, mkT)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
@@ -318,7 +319,7 @@ data ConAnn t = Ann t | NoAnn | Disabled
 data SimpleCon = SimpleCon {
     scName   :: Name,
     scFields :: [BangType]
-  } deriving (Eq, Show)
+  } deriving (Eq, Show, Data)
 
 -- | A \"simple\" datatype (no context, no kind signature, no deriving)
 data SimpleData = SimpleData {
@@ -326,19 +327,19 @@ data SimpleData = SimpleData {
     sdVars   :: [TyVarBndr],
     sdCons   :: [SimpleCon],
     sdDerivs :: [SimpleDeriv]
-  } deriving (Eq, Show)
+  } deriving (Eq, Show, Data)
 
 -- 'SBlank' and 'SStock' have the same effect but the first will trigger
 -- @-Wmissing-deriving-strategies@ if it is enabled and the second requires
 -- the @DerivingStrategies@ extension
-data SimpleStrategy = SBlank | SStock | SAnyclass deriving (Eq, Show)
+data SimpleStrategy = SBlank | SStock | SAnyclass deriving (Eq, Show, Data)
 
 -- | A \"simple\" deriving clause—either @stock@ or @anyclass@ strategy
 data SimpleDeriv =
   SimpleDeriv {
     sdStrat   :: SimpleStrategy,
     dsContext :: Cxt
-  } deriving (Eq, Show)
+  } deriving (Eq, Show, Data)
 
 -- | Extract a 'SimpleData' from a 'Dec', if it is a datatype with the given
 -- restrictions.
