@@ -85,3 +85,9 @@ executable deriv
   hs-source-dirs: examples/deriv
   main-is: Deriv.hs
   other-modules: DerivBase
+
+executable record
+  import: deps, example
+  hs-source-dirs: examples/record
+  main-is: Record.hs
+  other-modules: RecordBase
