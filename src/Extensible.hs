@@ -258,6 +258,9 @@ data Config = Config {
     -- | Applied to datatype name to get extension constructor & type family's
     -- name
     extensionName :: NameAffix,
+    -- | If extending a record constructor, apply this to the constructor name
+    -- to get the extension field's label.
+    extensionLabel :: NameAffix,
     -- | Applied to datatype name to get extension record name
     extRecordName :: NameAffix,
     -- | Applied to constructor names to get the names of the type fields in the
@@ -282,6 +285,7 @@ data Config = Config {
 --   bundleName      = NameSuffix "All",
 --   annotationName  = NamePrefix \"X\",
 --   extensionName   = NameSuffix \"X\",
+--   extensionLabel  = NamePrefix \"ext\",
 --   extRecordName   = NamePrefix \"Ext\",
 --   extRecTypeName  = NamePrefix \"type\",
 --   extRecNameName  = NamePrefix \"name\",
@@ -296,6 +300,7 @@ defaultConfig = Config {
     bundleName      = NameSuffix "All",
     annotationName  = NamePrefix "X",
     extensionName   = NameSuffix "X",
+    extensionLabel  = NamePrefix "ext",
     extRecordName   = NamePrefix "Ext",
     extRecTypeName  = NamePrefix "type",
     extRecNameName  = NamePrefix "name",
@@ -318,8 +323,11 @@ data ConAnn t = Ann t | NoAnn | Disabled
 -- | A \"simple\" constructor (non-record, non-GADT)
 data SimpleCon = SimpleCon {
     scName   :: Name,
-    scFields :: [BangType]
+    scFields :: SimpleFields
   } deriving (Eq, Show, Data)
+
+data SimpleFields = NormalFields [BangType] | RecFields [VarBangType]
+  deriving (Eq, Show, Data)
 
 -- | A \"simple\" datatype (no context, no kind signature, no deriving)
 data SimpleData = SimpleData {
@@ -355,7 +363,8 @@ simpleData _ = fail "not a datatype"
 
 -- | Extract a 'SimpleCon' from a 'Con', if it is the 'NormalC' case.
 simpleCon :: Con -> Q SimpleCon
-simpleCon (NormalC name fields) = pure $ SimpleCon name fields
+simpleCon (NormalC name fields) = pure $ SimpleCon name $ NormalFields fields
+simpleCon (RecC    name fields) = pure $ SimpleCon name $ RecFields    fields
 simpleCon _ = fail "only simple constructors supported for now"
 
 simpleDeriv :: DerivClause -> Q SimpleDeriv
@@ -384,6 +393,10 @@ extensibleWith conf ds = do
 tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
+
+fieldsLength :: SimpleFields -> Int
+fieldsLength (NormalFields fs) = length fs
+fieldsLength (RecFields    fs) = length fs
 
 makeExtensible :: Config
                -> String -- ^ module where @extensible{With}@ was called
@@ -425,25 +438,29 @@ strict = Bang NoSourceUnpackedness SourceStrict
 appExtTvs :: TH.Type -> Name -> [TyVarBndr] -> TH.Type
 appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 
--- | Generate an extended constructor by renaming it and replacing recursive
--- occrences of the datatype.
+-- | Generate an extended constructor by renaming it, replacing recursive
+-- occrences of the datatype, and adding an extension field at the end
 extendCon :: Config
           -> [(Name, Name)] -- ^ original & new datatype names
-          -> Name -- ^ new type variable name
-          -> [TyVarBndr] -- ^ original type variables
+          -> Name           -- ^ new type variable name
+          -> [TyVarBndr]    -- ^ original type variables
           -> SimpleCon -> ConQ
 extendCon conf nameMap ext tvs (SimpleCon name fields) = do
-  let name' = applyAffix (constructorName conf) name
-      xname = applyAffix (annotationName conf) name
-      fields' = map (extendRec nameMap ext) fields
-  pure $ NormalC name' $
-    fields' ++ [(strict, appExtTvs (ConT xname) ext tvs)]
+  let name'    = applyAffix (constructorName conf) name
+      xname    = applyAffix (annotationName conf) name
+      fields'  = extendRecursions nameMap ext fields
+      extField = appExtTvs (ConT xname) ext tvs
+  case fields' of
+    NormalFields fs -> pure $ NormalC name' $ fs ++ [(strict, extField)]
+    RecFields fs ->
+      let extLabel = applyAffix (extensionLabel conf) name in
+      pure $ RecC name' $ fs ++ [(extLabel, strict, extField)]
 
 -- | Replaces recursive occurences of the datatype with the new one.
-extendRec :: [(Name, Name)] -- ^ original & new datatype names
-          -> Name -- ^ new type variable name
-          -> BangType -> BangType
-extendRec nameMap ext = everywhere $ mkT go where
+extendRecursions :: [(Name, Name)] -- ^ original & new datatype names
+                 -> Name           -- ^ new type variable name
+                 -> SimpleFields -> SimpleFields
+extendRecursions nameMap ext = everywhere $ mkT go where
   go (ConT k) | Just new <- lookup k nameMap = ConT new `AppT` VarT ext
   go t = t
 
@@ -614,7 +631,7 @@ decsForCon :: Config
 decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
   tvs' <- replicateM (length tvs) (newName "a")
   ann  <- newName "ann"
-  args <- replicateM (length fields) (newName "x")
+  args <- replicateM (fieldsLength fields) (newName "x")
   let tyfam = qualifyWith home $ applyAffix (annotationName conf) name
       name' = qualifyWith home $ applyAffix (constructorName conf) name
       typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
