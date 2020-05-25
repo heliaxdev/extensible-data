@@ -9,4 +9,5 @@ do an <- newName "a"
      typeTX = [("Extra", a)]
    }
 
+main :: IO ()
 main = pure ()

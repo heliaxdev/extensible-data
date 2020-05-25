@@ -44,7 +44,10 @@ common example
   default-extensions:
     TemplateHaskell, TypeFamilies, PatternSynonyms, ConstraintKinds,
     StandaloneDeriving, FlexibleContexts, UndecidableInstances
-  ghc-options: -Wno-unused-top-binds -Wno-missing-pattern-synonym-signatures
+  ghc-options:
+    -Wno-unused-top-binds
+    -Wno-missing-pattern-synonym-signatures
+    -Wno-unused-imports
   if flag(dump-splices)
     ghc-options: -ddump-splices -fforce-recomp
   if !flag(build-examples)

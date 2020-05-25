@@ -4,4 +4,5 @@ QualifiedBase.extendT "T" [] [t|()|] $ QualifiedBase.defaultExtT {
   QualifiedBase.typeTX = [("C", [t|Char|])]
 }
 
+main :: IO ()
 main = pure ()

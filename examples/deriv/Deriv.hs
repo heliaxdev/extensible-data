@@ -9,6 +9,7 @@ extendA "A" [] [t|T|] $ defaultExtA {
 
 extendB "B" [] [t|T|] $ defaultExtB
 
+main :: IO ()
 main = print $
   (A (B "") 5 ["a", "b"]) ==
   (A (B "") 5 ["a", "b", "c"] :: A String)
