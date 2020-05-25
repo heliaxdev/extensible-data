@@ -63,7 +63,7 @@
 -- You will probably also currently want to disable the warning for missing
 -- @pattern@ type signatures (@-Wno-missing-pattern-synonym-signatures@).
 --
--- == Example
+-- == Example with regular constructors
 --
 -- @
 -- module Foo.Base where #Foo_Base#
@@ -172,6 +172,56 @@
 -- pattern Baz x y = <#Baz' Baz'> x y ()
 --
 -- {-\# COMPLETE <#Bar2 Bar>, <#Baz2 Baz> #-}
+-- @
+--
+-- == Example with records
+--
+-- @
+-- extensible [d|
+--     data Foo = R { bar :: Int, baz :: String }
+--   |]
+--
+-- ====>
+--
+-- data Foo' ext =
+--     R { bar :: Int, baz :: String, extR :: !(XR ext) }
+--   | FooX { extFoo :: !(FooX ext) }
+--       -- if all input constructors are records, the extension is too
+--
+-- type FooAll (c :: 'K.Type' -> 'K.Constaint') ext = ...
+--
+-- type family XR ext
+-- type family FooX ext
+--
+-- data ExtFoo = ExtFoo {
+--     nameR :: String,
+--     typeR :: ConAnn (String {- extension field label -}, TypeQ),
+--     ...
+--   }
+-- defaultExtFoo :: ExtFoo
+-- extendFoo :: String -> [Name] -> TypeQ -> ExtFoo -> DecsQ
+--   -- same as <#extendFoo above>
+-- @
+--
+-- @
+-- data A
+--
+-- extendFoo \"FooA\" [] [t|A|] $ defaultExtFoo {
+--     typeR = Ann (\"label\", [t|String|]),
+--     typeFooX = [(\"Error\", \"text\", [t|String|])]
+--   }
+--
+-- ====>
+--
+-- type instance XR A = String
+-- type instance FooX A = String
+--
+-- type FooA = Foo A
+--
+-- pattern R {bar, baz, label} = R' bar baz label
+-- pattern Error {text} = FooX text
+--
+-- {-\# COMPLETE R, Error \#-}
 -- @
 module Extensible
   (-- * Name manipulation
