@@ -15,4 +15,5 @@ foo :: Rec -> Rec
 foo r = r { R.beep = False, R.extR1 = "aaaaaa" }
 
 main :: IO ()
-main = pure ()
+main = print (R1 {beep = True, boop = 4, label1 = "hello"} :: Rec)
+  -- type annotation needed until the pat syns get signatures :/

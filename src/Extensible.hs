@@ -664,8 +664,9 @@ decsForCon :: Config
            -> [TyVarBndr] -> SimpleCon -> ExpQ
 decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
   tvs' <- replicateM (length tvs) (newName "a")
-  ann  <- newName "ann"
-  args <- replicateM (fieldsLength fields) (newName "x")
+  args <- case fields of
+    NormalFields fs -> replicateM (length fs) (newName "x")
+    RecFields    fs -> mapM (newName . nameBase . fst3) fs
   let tyfam = qualifyWith home $ applyAffix (annotationName conf) name
       name' = qualifyWith home $ applyAffix (constructorName conf) name
       typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
@@ -683,11 +684,14 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
         mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : map varT tvs') rhs
 #endif
         annType = $typeC $exts; patName = mkName $ $nameC $exts
-        mkPatSyn args' rhs = patSynD patName (prefixPatSyn args') implBidir rhs
+        mkPatSyn args' rhs = patSynD patName lhs implBidir rhs where
+          lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|]) args'
     in
     case annType of
       Ann a ->
-        let ty = $(if isRec then [|snd a|] else [|a|]) in
+        let ty  = $(if isRec then [|snd a|] else [|a|])
+            ann = mkName $(if isRec then [|fst a|] else stringE "ann")
+        in
         [mkTf $(foldl appE [|ty|] [[|varT tv|] | tv <- tvs']),
          mkPatSyn (args ++ [ann]) (conP name' (map varP (args ++ [ann])))]
       NoAnn ->
