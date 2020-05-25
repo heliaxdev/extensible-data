@@ -404,10 +404,6 @@ tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
 
-fieldsLength :: SimpleFields -> Int
-fieldsLength (NormalFields fs) = length fs
-fieldsLength (RecFields    fs) = length fs
-
 isRecordFields :: SimpleFields -> Bool
 isRecordFields (NormalFields {}) = False
 isRecordFields (RecFields    {}) = True
@@ -733,9 +729,11 @@ decsForExt conf home extsName tagName isRec tvs name = do
 #endif
         mkPatSyn mkRhs conann = do
           let patName = $getPName conann
-          x <- newName "x"
-          patSynD (mkName patName) (prefixPatSyn [x]) implBidir
-            (conP cname [mkRhs (varP x)])
+          lbl <- $(if isRec then [|pure $ mkName $ snd3 conann|]
+                             else [|newName "x"|])
+          let lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|])
+          patSynD (mkName patName) (lhs [lbl]) implBidir
+            (conP cname [mkRhs (varP lbl)])
     in
     tySyn : zipWith mkPatSyn (makeEithers (length typs)) typs|]
 
