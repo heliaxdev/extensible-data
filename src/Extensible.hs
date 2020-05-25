@@ -398,6 +398,10 @@ fieldsLength :: SimpleFields -> Int
 fieldsLength (NormalFields fs) = length fs
 fieldsLength (RecFields    fs) = length fs
 
+isRecordCon :: SimpleCon -> Bool
+isRecordCon (SimpleCon {scFields = NormalFields {}}) = True
+isRecordCon (SimpleCon {scFields = RecFields    {}}) = True
+
 makeExtensible :: Config
                -> String -- ^ module where @extensible{With}@ was called
                -> [SimpleData] -> DecsQ
@@ -415,7 +419,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
   cs' <- traverse (extendCon conf nameMap ext tvs) cs
-  let cx = extensionCon conf name ext tvs
+  let cx = extensionCon conf (all isRecordCon cs) name ext tvs
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
   bnd <- constraintBundle conf name ext tvs cs
@@ -442,7 +446,7 @@ appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 -- occrences of the datatype, and adding an extension field at the end
 extendCon :: Config
           -> [(Name, Name)] -- ^ original & new datatype names
-          -> Name           -- ^ new type variable name
+          -> Name           -- ^ @ext@ type variable name
           -> [TyVarBndr]    -- ^ original type variables
           -> SimpleCon -> ConQ
 extendCon conf nameMap ext tvs (SimpleCon name fields) = do
@@ -464,10 +468,21 @@ extendRecursions nameMap ext = everywhere $ mkT go where
   go (ConT k) | Just new <- lookup k nameMap = ConT new `AppT` VarT ext
   go t = t
 
-extensionCon :: Config -> Name -> Name -> [TyVarBndr] -> Con
-extensionCon conf name ext tvs =
-  let namex = applyAffix (extensionName conf) name in
-  NormalC namex [(strict, appExtTvs (ConT namex) ext tvs)]
+extensionCon :: Config
+             -> Bool        -- ^ make a record constructor?
+             -> Name        -- ^ datatype name
+             -> Name        -- ^ @ext@ type variable
+             -> [TyVarBndr] -- ^ original type variables
+             -> Con
+extensionCon conf record name ext tvs =
+  let namex = applyAffix (extensionName conf) name
+      label = applyAffix (extensionLabel conf) name
+      typ   = appExtTvs (ConT namex) ext tvs
+  in
+  if record then
+    RecC namex [(label, strict, typ)]
+  else
+    NormalC namex [(strict, typ)]
 
 extendFam :: Config -> [TyVarBndr] -> SimpleCon -> DecQ
 extendFam conf tvs (SimpleCon name _) =
