@@ -7,8 +7,8 @@ data WithString
 
 R.extendRec "Rec" [] [t|WithString|] $
   R.defaultExtRec {
-    R.typeR1 = Ann [t|String|],
-    R.typeR2 = Ann [t|String|]
+    R.typeR1 = Ann ("label1", [t|String|]),
+    R.typeR2 = Ann ("label2", [t|String|])
   }
 
 foo :: Rec -> Rec
