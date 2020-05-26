@@ -505,7 +505,7 @@ appExtTvs :: TH.Type -> Name -> [TyVarBndr] -> TH.Type
 appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 
 -- | Generate an extended constructor by renaming it, replacing recursive
--- occrences of the datatype, and adding an extension field at the end
+-- occurrences of the datatype, and adding an extension field at the end
 extendCon :: Config
           -> [(Name, Name)] -- ^ original & new datatype names
           -> Name           -- ^ @ext@ type variable name
