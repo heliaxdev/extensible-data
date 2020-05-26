@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE
-    CPP, DeriveLift, PatternSynonyms, StandaloneDeriving, TemplateHaskell
+    CPP, DeriveDataTypeable, DeriveLift, PatternSynonyms, StandaloneDeriving,
+    TemplateHaskell
   #-}
 
 -- | #maindoc#
@@ -62,7 +63,7 @@
 -- You will probably also currently want to disable the warning for missing
 -- @pattern@ type signatures (@-Wno-missing-pattern-synonym-signatures@).
 --
--- == Example
+-- == Example with regular constructors
 --
 -- @
 -- module Foo.Base where #Foo_Base#
@@ -172,6 +173,56 @@
 --
 -- {-\# COMPLETE <#Bar2 Bar>, <#Baz2 Baz> #-}
 -- @
+--
+-- == Example with records
+--
+-- @
+-- extensible [d|
+--     data Foo = R { bar :: Int, baz :: String }
+--   |]
+--
+-- ====>
+--
+-- data Foo' ext =
+--     R { bar :: Int, baz :: String, extR :: !(XR ext) }
+--   | FooX { extFoo :: !(FooX ext) }
+--       -- if all input constructors are records, the extension is too
+--
+-- type FooAll (c :: 'K.Type' -> 'K.Constaint') ext = ...
+--
+-- type family XR ext
+-- type family FooX ext
+--
+-- data ExtFoo = ExtFoo {
+--     nameR :: String,
+--     typeR :: ConAnn (String {- extension field label -}, TypeQ),
+--     ...
+--   }
+-- defaultExtFoo :: ExtFoo
+-- extendFoo :: String -> [Name] -> TypeQ -> ExtFoo -> DecsQ
+--   -- same as <#extendFoo above>
+-- @
+--
+-- @
+-- data A
+--
+-- extendFoo \"FooA\" [] [t|A|] $ defaultExtFoo {
+--     typeR = Ann (\"label\", [t|String|]),
+--     typeFooX = [(\"Error\", \"text\", [t|String|])]
+--   }
+--
+-- ====>
+--
+-- type instance XR A = String
+-- type instance FooX A = String
+--
+-- type FooA = Foo A
+--
+-- pattern R {bar, baz, label} = R' bar baz label
+-- pattern Error {text} = FooX text
+--
+-- {-\# COMPLETE R, Error \#-}
+-- @
 module Extensible
   (-- * Name manipulation
    NameAffix (.., NamePrefix, NameSuffix), applyAffix,
@@ -183,7 +234,7 @@ where
 
 import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
-import Generics.SYB (everywhere, mkT)
+import Generics.SYB (Data, everywhere, mkT)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
@@ -231,6 +282,16 @@ applyAffix :: NameAffix -> Name -> Name
 applyAffix (NameAffix pre suf) = onNameBase (\b -> pre ++ b ++ suf)
 
 
+fst3 :: (a, b, c) -> a
+fst3 (x, _, _) = x
+
+snd3 :: (a, b, c) -> b
+snd3 (_, y, _) = y
+
+thd3 :: (a, b, c) -> c
+thd3 (_, _, z) = z
+
+
 -- | Qualified a name with a module, /unless/ it is already qualified.
 --
 -- >>> qualifyWith "Mod" (mkName "foo")
@@ -257,6 +318,9 @@ data Config = Config {
     -- | Applied to datatype name to get extension constructor & type family's
     -- name
     extensionName :: NameAffix,
+    -- | If extending a record constructor, apply this to the constructor name
+    -- to get the extension field's label.
+    extensionLabel :: NameAffix,
     -- | Applied to datatype name to get extension record name
     extRecordName :: NameAffix,
     -- | Applied to constructor names to get the names of the type fields in the
@@ -281,6 +345,7 @@ data Config = Config {
 --   bundleName      = NameSuffix "All",
 --   annotationName  = NamePrefix \"X\",
 --   extensionName   = NameSuffix \"X\",
+--   extensionLabel  = NamePrefix \"ext\",
 --   extRecordName   = NamePrefix \"Ext\",
 --   extRecTypeName  = NamePrefix \"type\",
 --   extRecNameName  = NamePrefix \"name\",
@@ -295,6 +360,7 @@ defaultConfig = Config {
     bundleName      = NameSuffix "All",
     annotationName  = NamePrefix "X",
     extensionName   = NameSuffix "X",
+    extensionLabel  = NamePrefix "ext",
     extRecordName   = NamePrefix "Ext",
     extRecTypeName  = NamePrefix "type",
     extRecNameName  = NamePrefix "name",
@@ -317,8 +383,11 @@ data ConAnn t = Ann t | NoAnn | Disabled
 -- | A \"simple\" constructor (non-record, non-GADT)
 data SimpleCon = SimpleCon {
     scName   :: Name,
-    scFields :: [BangType]
-  } deriving (Eq, Show)
+    scFields :: SimpleFields
+  } deriving (Eq, Show, Data)
+
+data SimpleFields = NormalFields [BangType] | RecFields [VarBangType]
+  deriving (Eq, Show, Data)
 
 -- | A \"simple\" datatype (no context, no kind signature, no deriving)
 data SimpleData = SimpleData {
@@ -326,19 +395,19 @@ data SimpleData = SimpleData {
     sdVars   :: [TyVarBndr],
     sdCons   :: [SimpleCon],
     sdDerivs :: [SimpleDeriv]
-  } deriving (Eq, Show)
+  } deriving (Eq, Show, Data)
 
 -- 'SBlank' and 'SStock' have the same effect but the first will trigger
 -- @-Wmissing-deriving-strategies@ if it is enabled and the second requires
 -- the @DerivingStrategies@ extension
-data SimpleStrategy = SBlank | SStock | SAnyclass deriving (Eq, Show)
+data SimpleStrategy = SBlank | SStock | SAnyclass deriving (Eq, Show, Data)
 
 -- | A \"simple\" deriving clause—either @stock@ or @anyclass@ strategy
 data SimpleDeriv =
   SimpleDeriv {
     sdStrat   :: SimpleStrategy,
     dsContext :: Cxt
-  } deriving (Eq, Show)
+  } deriving (Eq, Show, Data)
 
 -- | Extract a 'SimpleData' from a 'Dec', if it is a datatype with the given
 -- restrictions.
@@ -354,7 +423,8 @@ simpleData _ = fail "not a datatype"
 
 -- | Extract a 'SimpleCon' from a 'Con', if it is the 'NormalC' case.
 simpleCon :: Con -> Q SimpleCon
-simpleCon (NormalC name fields) = pure $ SimpleCon name fields
+simpleCon (NormalC name fields) = pure $ SimpleCon name $ NormalFields fields
+simpleCon (RecC    name fields) = pure $ SimpleCon name $ RecFields    fields
 simpleCon _ = fail "only simple constructors supported for now"
 
 simpleDeriv :: DerivClause -> Q SimpleDeriv
@@ -384,6 +454,16 @@ tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
 
+isRecordFields :: SimpleFields -> Bool
+isRecordFields (NormalFields {}) = False
+isRecordFields (RecFields    {}) = True
+
+isRecordCon :: SimpleCon -> Bool
+isRecordCon = isRecordFields . scFields
+
+extIsRecord :: [SimpleCon] -> Bool
+extIsRecord = all isRecordCon
+
 makeExtensible :: Config
                -> String -- ^ module where @extensible{With}@ was called
                -> [SimpleData] -> DecsQ
@@ -401,7 +481,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
   cs' <- traverse (extendCon conf nameMap ext tvs) cs
-  let cx = extensionCon conf name ext tvs
+  let cx = extensionCon conf (extIsRecord cs) name ext tvs
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
   bnd <- constraintBundle conf name ext tvs cs
@@ -424,32 +504,47 @@ strict = Bang NoSourceUnpackedness SourceStrict
 appExtTvs :: TH.Type -> Name -> [TyVarBndr] -> TH.Type
 appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 
--- | Generate an extended constructor by renaming it and replacing recursive
--- occrences of the datatype.
+-- | Generate an extended constructor by renaming it, replacing recursive
+-- occurrences of the datatype, and adding an extension field at the end
 extendCon :: Config
           -> [(Name, Name)] -- ^ original & new datatype names
-          -> Name -- ^ new type variable name
-          -> [TyVarBndr] -- ^ original type variables
+          -> Name           -- ^ @ext@ type variable name
+          -> [TyVarBndr]    -- ^ original type variables
           -> SimpleCon -> ConQ
 extendCon conf nameMap ext tvs (SimpleCon name fields) = do
-  let name' = applyAffix (constructorName conf) name
-      xname = applyAffix (annotationName conf) name
-      fields' = map (extendRec nameMap ext) fields
-  pure $ NormalC name' $
-    fields' ++ [(strict, appExtTvs (ConT xname) ext tvs)]
+  let name'    = applyAffix (constructorName conf) name
+      xname    = applyAffix (annotationName conf) name
+      fields'  = extendRecursions nameMap ext fields
+      extField = appExtTvs (ConT xname) ext tvs
+  case fields' of
+    NormalFields fs -> pure $ NormalC name' $ fs ++ [(strict, extField)]
+    RecFields fs ->
+      let extLabel = applyAffix (extensionLabel conf) name in
+      pure $ RecC name' $ fs ++ [(extLabel, strict, extField)]
 
 -- | Replaces recursive occurences of the datatype with the new one.
-extendRec :: [(Name, Name)] -- ^ original & new datatype names
-          -> Name -- ^ new type variable name
-          -> BangType -> BangType
-extendRec nameMap ext = everywhere $ mkT go where
+extendRecursions :: [(Name, Name)] -- ^ original & new datatype names
+                 -> Name           -- ^ new type variable name
+                 -> SimpleFields -> SimpleFields
+extendRecursions nameMap ext = everywhere $ mkT go where
   go (ConT k) | Just new <- lookup k nameMap = ConT new `AppT` VarT ext
   go t = t
 
-extensionCon :: Config -> Name -> Name -> [TyVarBndr] -> Con
-extensionCon conf name ext tvs =
-  let namex = applyAffix (extensionName conf) name in
-  NormalC namex [(strict, appExtTvs (ConT namex) ext tvs)]
+extensionCon :: Config
+             -> Bool        -- ^ make a record constructor?
+             -> Name        -- ^ datatype name
+             -> Name        -- ^ @ext@ type variable
+             -> [TyVarBndr] -- ^ original type variables
+             -> Con
+extensionCon conf record name ext tvs =
+  let namex = applyAffix (extensionName conf) name
+      label = applyAffix (extensionLabel conf) name
+      typ   = appExtTvs (ConT namex) ext tvs
+  in
+  if record then
+    RecC namex [(label, strict, typ)]
+  else
+    NormalC namex [(strict, typ)]
 
 extendFam :: Config -> [TyVarBndr] -> SimpleCon -> DecQ
 extendFam conf tvs (SimpleCon name _) =
@@ -517,11 +612,13 @@ extRecord :: Config -> Name -> [TyVarBndr] -> [SimpleCon]
           -> Q (Name, [(Name, Name, String)], Name, Dec)
 extRecord conf cname tvs cs = do
   let rname = applyAffix (extRecordName conf) cname
-      conann_  t = [t| ConAnn $t |]
-      lblList_ t = [t| [(String, $t)] |]
-  tfields  <- traverse (extRecTypeField conann_ conf tvs . scName) cs
+      conann c t | isRecordCon c = [t| ConAnn (String, $t) |]
+                 | otherwise     = [t| ConAnn          $t  |]
+      lblList t | extIsRecord cs = [t| [(String, String, $t)] |]
+                | otherwise      = [t| [(String,         $t)] |]
+  tfields  <- traverse (\c -> extRecTypeField conf (conann c) tvs (scName c)) cs
   nfields  <- traverse (extRecNameField conf . scName) cs
-  extField <- extRecTypeField lblList_ conf tvs
+  extField <- extRecTypeField conf lblList tvs
                 (applyAffix (extensionName conf) cname)
   pure (rname,
         zip3 (map fieldName tfields)
@@ -533,9 +630,10 @@ extRecord conf cname tvs cs = do
  where
   fieldName (n, _, _) = n
 
-extRecTypeField :: (TypeQ -> TypeQ)
-                -> Config -> [TyVarBndr] -> Name -> VarBangTypeQ
-extRecTypeField f conf tvs name = do
+extRecTypeField :: Config
+                -> (TypeQ -> TypeQ)
+                -> [TyVarBndr] -> Name -> VarBangTypeQ
+extRecTypeField conf f tvs name = do
   let fname = applyAffix (extRecTypeName conf) name
   ty <- f (mkTy tvs)
   pure (fname, nonstrict, ty)
@@ -582,7 +680,7 @@ makeExtender conf home name' rname' tvs cs = do
   exts <- newName "exts"
   defn <- [|sequence $ concat $(listE $
               map (decsForCon conf home exts tag tvs) cs ++
-              [decsForExt conf home exts tag tvs name,
+              [decsForExt conf home exts tag (extIsRecord cs) tvs name,
                makeTySyn conf home name syn vars tag,
                completePrag conf exts cs name])|]
   let val = FunD ename
@@ -612,13 +710,16 @@ decsForCon :: Config
            -> [TyVarBndr] -> SimpleCon -> ExpQ
 decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
   tvs' <- replicateM (length tvs) (newName "a")
-  ann  <- newName "ann"
-  args <- replicateM (length fields) (newName "x")
+  args <- case fields of
+    NormalFields fs -> replicateM (length fs) (newName "x")
+    RecFields    fs -> mapM (newName . nameBase . fst3) fs
   let tyfam = qualifyWith home $ applyAffix (annotationName conf) name
       name' = qualifyWith home $ applyAffix (constructorName conf) name
       typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
       nameC = varE $ qualifyWith home $ applyAffix (extRecNameName conf) name
-      exts  = varE extsName; tag = varE tagName
+      exts  = varE extsName
+      tag   = varE tagName
+      isRec = isRecordFields fields
   [|let
 #if MIN_VERSION_template_haskell(2,15,0)
         mkTf rhs = tySynInstD $
@@ -629,11 +730,15 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
         mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : map varT tvs') rhs
 #endif
         annType = $typeC $exts; patName = mkName $ $nameC $exts
-        mkPatSyn args' rhs = patSynD patName (prefixPatSyn args') implBidir rhs
+        mkPatSyn args' rhs = patSynD patName lhs implBidir rhs where
+          lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|]) args'
     in
     case annType of
-      Ann ty ->
-        [mkTf $(foldl appE [|ty|] [[|varT a|] | a <- tvs']),
+      Ann a ->
+        let ty  = $(if isRec then [|snd a|] else [|a|])
+            ann = mkName $(if isRec then [|fst a|] else stringE "ann")
+        in
+        [mkTf $(foldl appE [|ty|] [[|varT tv|] | tv <- tvs']),
          mkPatSyn (args ++ [ann]) (conP name' (map varP (args ++ [ann])))]
       NoAnn ->
         [mkTf (tupleT 0),
@@ -647,18 +752,21 @@ decsForExt :: Config
            -> String -- ^ module where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
            -> Name -- ^ name of the bound @tag@ variable in @extendX@
+           -> Bool -- ^ is the extension a record?
            -> [TyVarBndr] -> Name -> ExpQ
-decsForExt conf home extsName tagName tvs name = do
+decsForExt conf home extsName tagName isRec tvs name = do
   args <- replicateM (length tvs) (newName "a")
-  let cname' = applyAffix (extensionName conf) name
-      cname  = qualifyWith home cname'
-      typeC = varE $ applyAffix (extRecTypeName conf) cname'
-      tyfam = applyAffix (extensionName conf) name
-      exts  = varE extsName; tag = varE tagName
+  let cname'   = applyAffix (extensionName conf) name
+      cname    = qualifyWith home cname'
+      typeC    = varE $ applyAffix (extRecTypeName conf) cname'
+      tyfam    = applyAffix (extensionName conf) name
+      exts     = varE extsName; tag = varE tagName
+      getTy    = if isRec then [|thd3|] else [|snd|]
+      getPName = if isRec then [|fst3|] else [|fst|]
   [|let typs = $typeC $exts
         tySynRhs = case typs of
           [] -> conT $(lift ''Void)
-          ts -> foldr1 mkEither $ map (appArgs . snd) ts
+          ts -> foldr1 mkEither $ map (appArgs . $getTy) ts
           where mkEither t u = conT $(lift ''Either) `appT` t `appT` u
                 appArgs t = $(appsE $ [|t|] : map (\x -> [|varT x|]) args)
 #if MIN_VERSION_template_haskell(2,15,0)
@@ -669,10 +777,13 @@ decsForExt conf home extsName tagName tvs name = do
         tySyn = tySynInstD tyfam $
           tySynEqn ($tag : map varT args) tySynRhs
 #endif
-        mkPatSyn mkRhs (patName, _) = do
-          x <- newName "x"
-          patSynD (mkName patName) (prefixPatSyn [x]) implBidir
-            (conP cname [mkRhs (varP x)])
+        mkPatSyn mkRhs conann = do
+          let patName = $getPName conann
+          lbl <- $(if isRec then [|pure $ mkName $ snd3 conann|]
+                             else [|newName "x"|])
+          let lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|])
+          patSynD (mkName patName) (lhs [lbl]) implBidir
+            (conP cname [mkRhs (varP lbl)])
     in
     tySyn : zipWith mkPatSyn (makeEithers (length typs)) typs|]
 
@@ -690,10 +801,11 @@ completePrag conf extsName cs name =
         in
         [|$cie (mkName ($nameC $exts)) ($typeC $exts)|]
       typeE = varE $ applyAffix (extRecTypeName <> extensionName $ conf) name
+      getPName = if extIsRecord cs then [|fst3|] else [|fst|]
   in
   [|let conIfEnabled _ Disabled = []
         conIfEnabled n _        = [n]
-        allExts = map $ mkName . fst
+        allExts = map $ mkName . $getPName
     in
     [pragCompleteD
       (concat $(listE $ map (mkCie [|conIfEnabled|]) cs) ++
@@ -710,6 +822,8 @@ completePrag conf extsName cs name =
 --  \p -> [p|Right (Right (Left $p))|],
 --  \p -> [p|Right (Right (Right $p))|]]
 -- @
+--
+-- @makeEithers 1@ produces @[\p -> p]@.
 makeEithers :: Int -> [PatQ -> PatQ]
 makeEithers = addEithers' id where
   addEithers' _ 0 = []
