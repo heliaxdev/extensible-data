@@ -3,11 +3,12 @@ import DerivBase
 
 data T
 
-extendA "A" [] [t|T|] $ defaultExtA {
-    typeA = Ann [\a -> [t| [$a] |]]
+extendA "A" [] [t|T|] $
+  \a -> defaultExtA {
+    typeA = Ann [[t| [$a] |]]
   }
 
-extendB "B" [] [t|T|] $ defaultExtB
+extendB "B" [] [t|T|] $ \_ -> defaultExtB
 
 main :: IO ()
 main = print $

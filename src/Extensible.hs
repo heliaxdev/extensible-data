@@ -444,6 +444,9 @@ tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
 
+tvbToTypeExp :: TyVarBndr -> ExpQ
+tvbToTypeExp tv = [|varT $(lift $ tyvarName tv)|]
+
 isRecordFields :: SimpleFields -> Bool
 isRecordFields (NormalFields {}) = False
 isRecordFields (RecFields    {}) = True
@@ -477,15 +480,15 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   bnd <- constraintBundle conf name ext tvs cs
   insts <- fmap concat $
     traverse (makeInstances conf name' (map fst nameMap) ext tvs) derivs
-  (rname, fcnames, fname, rec) <- extRecord conf name tvs cs
+  (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
   return $
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
     efs ++ [efx, bnd] ++ insts ++ [rec] ++ defRec ++ extFun
 
-nonstrict :: Bang
-nonstrict = Bang NoSourceUnpackedness NoSourceStrictness
+nonstrict :: BangQ
+nonstrict = bang noSourceUnpackedness noSourceStrictness
 
 strict :: Bang
 strict = Bang NoSourceUnpackedness SourceStrict
@@ -598,18 +601,18 @@ extendFam' name tvs = do
 --   (type field, name field, constructor name)
 -- * extension constructor field name
 -- * record declaration to splice
-extRecord :: Config -> Name -> [TyVarBndr] -> [SimpleCon]
+extRecord :: Config -> Name -> [SimpleCon]
           -> Q (Name, [(Name, Name, String)], Name, Dec)
-extRecord conf cname tvs cs = do
+extRecord conf cname cs = do
   let rname = applyAffix (extRecordName conf) cname
-      conann c t | isRecordCon c = [t| ConAnn [(String, $t)] |]
-                 | otherwise     = [t| ConAnn [         $t ] |]
-      extList t | extIsRecord cs = [t| [(String, [(String, $t)])] |]
-                | otherwise      = [t| [(String, [         $t ])] |]
-  tfields  <- traverse (\c -> extRecTypeField conf (conann c) tvs (scName c)) cs
+      conann c | isRecordCon c = [t| ConAnn [(String, TypeQ)] |]
+               | otherwise     = [t| ConAnn [         TypeQ ] |]
+      extList | extIsRecord cs = [t| [(String, [(String, TypeQ)])] |]
+              | otherwise      = [t| [(String, [         TypeQ ])] |]
+  tfields  <- traverse (\c -> extRecTypeField conf (conann c) (scName c)) cs
   nfields  <- traverse (extRecNameField conf . scName) cs
-  extField <- extRecTypeField conf extList tvs
-                (applyAffix (extensionName conf) cname)
+  extField <- extRecTypeField conf extList $
+                applyAffix (extensionName conf) cname
   pure (rname,
         zip3 (map fieldName tfields)
              (map fieldName nfields)
@@ -620,22 +623,14 @@ extRecord conf cname tvs cs = do
  where
   fieldName (n, _, _) = n
 
-extRecTypeField :: Config
-                -> (TypeQ -> TypeQ)
-                -> [TyVarBndr] -> Name -> VarBangTypeQ
-extRecTypeField conf f tvs name = do
-  let fname = applyAffix (extRecTypeName conf) name
-  ty <- f (mkTy tvs)
-  pure (fname, nonstrict, ty)
- where
-  mkTy []     = [t|TypeQ|]
-  mkTy (_:xs) = [t|TypeQ -> $(mkTy xs)|]
+extRecTypeField :: Config -> TypeQ -> Name -> VarBangTypeQ
+extRecTypeField conf ty name =
+  varBangType (applyAffix (extRecTypeName conf) name) $ bangType nonstrict ty
 
 extRecNameField :: Config -> Name -> VarBangTypeQ
 extRecNameField conf name = do
-  let fname = applyAffix (extRecNameName conf) name
-  ty <- [t|String|]
-  pure (fname, nonstrict, ty)
+  varBangType (applyAffix (extRecNameName conf) name) $
+    bangType nonstrict [t|String|]
 
 extRecDefault :: Config
               -> Name -- ^ record name
@@ -663,18 +658,25 @@ makeExtender conf home name' rname' tvs cs = do
   let name  = qualifyWith home name'
       rname = qualifyWith home rname'
       ename = applyAffix (extFunName conf) name'
-  sig  <- sigD ename [t|String -> [Name] -> TypeQ -> $(conT rname) -> DecsQ|]
+      rtype = go tvs where
+        go []     = conT rname
+        go (_:xs) = [t|TypeQ -> $(go xs)|]
+  sig  <- sigD ename [t|String -> [Name] -> TypeQ -> $rtype -> DecsQ|]
   syn  <- newName "syn"
   vars <- newName "vars"
   tag  <- newName "tag"
   exts <- newName "exts"
-  defn <- [|sequence $ concat $(listE $
-              map (decsForCon conf home exts tag tvs) cs ++
-              [decsForExt conf home exts tag (extIsRecord cs) tvs name,
-               makeTySyn conf home name syn vars tag,
-               completePrag conf exts cs name])|]
-  let val = FunD ename
-        [Clause (map VarP [syn, vars, tag, exts]) (NormalB defn) []]
+  exts' <- newName "exts'"
+  let defn =
+        [|sequence $ concat $(listE $
+            map (decsForCon conf home exts' tag tvs) cs ++
+            [decsForExt conf home exts' tag (extIsRecord cs) tvs name,
+             makeTySyn conf home name syn vars tag,
+             completePrag conf exts' cs name])|]
+  let args = map (\tv -> [|varT $(lift $ tyvarName tv)|]) tvs
+  val <- funD ename
+        [clause (map varP [syn, vars, tag, exts]) (normalB defn)
+         [valD (varP exts') (normalB (appsE (varE exts : args))) []]]
   pure (ename, [sig, val])
 
 -- | Generates a type synonym for an extensible datatype applied to a specific
@@ -699,7 +701,6 @@ decsForCon :: Config
            -> Name -- ^ name of the bound @tag@ variable in @extendX@
            -> [TyVarBndr] -> SimpleCon -> ExpQ
 decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
-  tvs' <- replicateM (length tvs) (newName "a")
   args <- case fields of
     NormalFields fs -> replicateM (length fs) (newName "x")
     RecFields    fs -> mapM (\(n, _, _) -> newName $ nameBase n) fs
@@ -710,14 +711,15 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
       exts  = varE extsName
       tag   = varE tagName
       isRec = isRecordFields fields
+      tvs'  = listE $ map tvbToTypeExp tvs
   [|let
 #if MIN_VERSION_template_haskell(2,15,0)
         mkTf rhs = tySynInstD $
           tySynEqn Nothing
-            (foldl appT (conT tyfam) $ $tag : map varT tvs')
+            (foldl appT (conT tyfam) $ $tag : $tvs')
             rhs
 #else
-        mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : map varT tvs') rhs
+        mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : $tvs') rhs
 #endif
         annType = $typeC $exts; patName = mkName $ $nameC $exts
         mkPatSyn args' rhs = patSynD patName lhs implBidir rhs where
@@ -725,8 +727,7 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
     in
     case annType of
       Ann as ->
-        let appArgs t = $(foldl appE [|t|] [[|varT tv|] | tv <- tvs'])
-            ty = tupT $ map appArgs $(if isRec then [|map snd as|] else [|as|])
+        let ty = tupT $(if isRec then [|map snd as|] else [|as|])
             anns =
               $(if isRec then
                 [|map (mkName . fst) as|]
@@ -751,26 +752,25 @@ decsForExt :: Config
            -> Bool -- ^ is the extension a record?
            -> [TyVarBndr] -> Name -> ExpQ
 decsForExt conf home extsName tagName isRec tvs name = do
-  args <- replicateM (length tvs) (newName "a")
   let cname'   = applyAffix (extensionName conf) name
       cname    = qualifyWith home cname'
       typeC    = varE $ applyAffix (extRecTypeName conf) cname'
       tyfam    = applyAffix (extensionName conf) name
       exts     = varE extsName; tag = varE tagName
       getTy    = if isRec then [|map snd|] else [|id|]
+      tvs'     = listE $ map tvbToTypeExp tvs
   [|let typs = $typeC $exts
         tySynRhs = case typs of
           [] -> conT $(lift ''Void)
-          ts -> foldr1 mkEither $ map (tupT . map appArgs . $getTy . snd) ts
+          ts -> foldr1 mkEither $ map (tupT . $getTy . snd) ts
           where mkEither t u = conT $(lift ''Either) `appT` t `appT` u
-                appArgs t = $(appsE $ [|t|] : map (\x -> [|varT x|]) args)
 #if MIN_VERSION_template_haskell(2,15,0)
         tySyn = tySynInstD $ tySynEqn Nothing
-          (foldl appT (conT tyfam) ($tag : map varT args))
+          (foldl appT (conT tyfam) ($tag : $tvs'))
           tySynRhs
 #else
         tySyn = tySynInstD tyfam $
-          tySynEqn ($tag : map varT args) tySynRhs
+          tySynEqn ($tag : $tvs') tySynRhs
 #endif
         mkPatSyn mkRhs (patName, flds) =
           let lbls =
