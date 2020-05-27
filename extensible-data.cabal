@@ -100,3 +100,9 @@ executable multifield
   hs-source-dirs: examples/multifield
   main-is: MultiField.hs
   other-modules: MultiFieldBase
+
+executable lam
+  import: deps, example
+  hs-source-dirs: examples/lam
+  main-is: Lam.hs
+  other-modules: LamBase
