@@ -229,7 +229,7 @@ module Extensible
    -- ** Template Haskell re-exports
    newName, varT,
    -- * Generating extensible datatypes
-   extensible, extensibleWith, Config (..), defaultConfig, ConAnn(..))
+   extensible, extensibleWith, Config (..), defaultConfig)
 where
 
 import Language.Haskell.TH as TH
@@ -357,17 +357,6 @@ defaultConfig = Config {
     defExtRecName   = NamePrefix "default",
     extFunName      = NamePrefix "extend"
   }
-
-
--- | An annotation for a constructor. @t@ is @'TypeQ' -> ... -> 'TypeQ'@ with
--- one argument for each type variable in the original datatype declaration.
---
--- * 'Ann': the annotation is the given type
--- * 'NoAnn': no annotation (filled in with @()@ automatically by the pattern
---   synonym)
--- * 'Disabled': constructor disabled (annotation type is 'Void' and no pattern
---   synonym generated)
-data ConAnn t = Ann t | NoAnn | Disabled
 
 
 -- | A \"simple\" constructor (non-record, non-GADT)
@@ -605,8 +594,8 @@ extRecord :: Config -> Name -> [SimpleCon]
           -> Q (Name, [(Name, Name, String)], Name, Dec)
 extRecord conf cname cs = do
   let rname = applyAffix (extRecordName conf) cname
-      conann c | isRecordCon c = [t| ConAnn [(String, TypeQ)] |]
-               | otherwise     = [t| ConAnn [         TypeQ ] |]
+      conann c | isRecordCon c = [t| Maybe [(String, TypeQ)] |]
+               | otherwise     = [t| Maybe [         TypeQ ] |]
       extList | extIsRecord cs = [t| [(String, [(String, TypeQ)])] |]
               | otherwise      = [t| [(String, [         TypeQ ])] |]
   tfields  <- traverse (\c -> extRecTypeField conf (conann c) (scName c)) cs
@@ -640,7 +629,7 @@ extRecDefault :: Config
               -> Name -- ^ field name for extension
               -> Q (Name, [Dec])
 extRecDefault conf rname fcnames fname = do
-  let mkField (t, n, c) = [fieldExp t [|NoAnn|], fieldExp n (stringE c)]
+  let mkField (t, n, c) = [fieldExp t [|Just []|], fieldExp n (stringE c)]
       fields = concatMap mkField fcnames
       xfield = fieldExp fname [| [] |]
       dname = applyAffix (defExtRecName conf) rname
@@ -726,7 +715,7 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
           lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|]) args'
     in
     case annType of
-      Ann as ->
+      Just as ->
         let ty = tupT $(if isRec then [|map snd as|] else [|as|])
             anns =
               $(if isRec then
@@ -737,10 +726,7 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
         [mkTf ty,
          mkPatSyn (args ++ anns)
                   (conP name' (map varP args ++ [tupP (map varP anns)]))]
-      NoAnn ->
-        [mkTf (tupleT 0),
-         mkPatSyn args (conP name' (map varP args ++ [conP $(lift '()) []]))]
-      Disabled ->
+      Nothing ->
         [mkTf (conT $(lift ''Void))]
    |]
 
@@ -803,8 +789,8 @@ completePrag conf extsName cs name =
         [|$cie (mkName ($nameC $exts)) ($typeC $exts)|]
       typeE = varE $ applyAffix (extRecTypeName <> extensionName $ conf) name
   in
-  [|let conIfEnabled _ Disabled = []
-        conIfEnabled n _        = [n]
+  [|let conIfEnabled _ Nothing  = []
+        conIfEnabled n (Just _) = [n]
         allExts = map $ mkName . fst
     in
     [pragCompleteD

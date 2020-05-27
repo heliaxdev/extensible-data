@@ -5,7 +5,7 @@ data T
 
 extendA "A" [] [t|T|] $
   \a -> defaultExtA {
-    typeA = Ann [[t| [$a] |]]
+    typeA = Just [[t| [$a] |]]
   }
 
 extendB "B" [] [t|T|] $ \_ -> defaultExtB

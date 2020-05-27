@@ -8,7 +8,7 @@ extendA "A" [] [t|Ext|] defaultExtA {
 }
 
 extendB "B" [] [t|Ext|] defaultExtB {
-  typeBA = Ann [[t|String|]]
+  typeBA = Just [[t|String|]]
 }
 
 main :: IO ()
