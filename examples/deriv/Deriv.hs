@@ -4,7 +4,7 @@ import DerivBase
 data T
 
 extendA "A" [] [t|T|] $ defaultExtA {
-    typeA = Ann $ \a -> [t| [$a] |]
+    typeA = Ann [\a -> [t| [$a] |]]
   }
 
 extendB "B" [] [t|T|] $ defaultExtB
