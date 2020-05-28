@@ -29,7 +29,28 @@
 -- * A record and TH function are generated for creating new extensions of the
 --   base datatype (see @<#FooExt FooExt>@ and @<#extendFoo extendFoo>@).
 -- * A standalone @deriving@ declaration is generated for each derived instance
---   listed. __Note that this has some caveats__:
+--   listed.
+--
+-- = Known bugs and shortcomings
+--
+-- * Due to GHC's staging restriction, a Template Haskell function cannot be
+--   spliced in the same module as it is defined. That means it is not possible
+--   to write @'extensible' [d| data Foo = ... |]; extendFoo ...@ within the
+--   same module.
+-- * When using qualified imports, the module containing @extendFoo@ must be
+--   imported using its real name. It can also be imported using an alias if
+--   desired, e.g.
+--   @import qualified LongName; import qualified LongName as L@.
+-- * The same record label cannot be used for multiple different constructors.
+--   (The @DuplicateRecordFields@ extension doesn't seem to lift this
+--   restriction with pattern synonyms.)
+-- * Pattern synonyms do not yet get type annotations, which means that GHC
+--   cannot always work out which variant of the type you want. You will
+--   probably also want to disable the warning in modules calling @extendFoo@
+--   until this is fixed (e.g. with
+--   @{-\# OPTIONS_GHC -Wno-missing-pattern-synonym-signatures \#-}@).
+--
+-- * The @deriving@ supported is quite limited compared to full GHC:
 --
 --     * Only @stock@ and @anyclass@ strategies are supported.
 --     * __The context is not calculated properly like a real deriving clause__.
@@ -41,31 +62,18 @@
 --     * Deriving for non-regular datatypes (datatypes with recursive
 --       occurrences applied to different types) doesn't work.
 --
--- Due to GHC's staging restriction, it is not possible to write
--- @'extensible' [d| data Foo = ... |]@ and use the generated @extendFoo@
--- function within the same module.
+-- = Language extensions
 --
--- The module where @extensible@ is called needs the following extensions to be
--- enabled:
+-- The module where @extensible@ is called needs the extensions
+-- @TemplateHaskell@, @TypeFamilies@, @FlexibleContexts@,
+-- @UndecidableInstances@, @ConstraintKinds@, @KindSignatures@,
+-- @StandaloneDeriving@ to be enabled.
 --
--- * @TemplateHaskell@,
--- * @TypeFamilies@,
--- * @FlexibleContexts@,
--- * @UndecidableInstances@,
--- * @ConstraintKinds@,
--- * @KindSignatures@, and
--- * @StandaloneDeriving@.
+-- Modules calling @extendFoo@ need @TemplateHaskell@, @TypeFamilies@,
+-- @PatternSynonyms@.
 --
--- Modules calling @extendFoo@ need:
 --
--- * @TemplateHaskell@,
--- * @TypeFamilies@, and
--- * @PatternSynonyms@.
---
--- You will probably also currently want to disable the warning for missing
--- @pattern@ type signatures (@-Wno-missing-pattern-synonym-signatures@).
---
--- == Example
+-- = Example
 --
 -- @
 -- module Base where    #Base#
@@ -126,19 +134,24 @@
 -- -- (don't rely on the field order; use record syntax instead)
 -- data ExtLam =                                                         #ExtLam#
 --   ExtLam {
---     nameVar :: 'String', -- rename a constructor                      #nameVar#
+--     -- rename the Var constructor
+--     nameVar :: 'String',                                              #nameVar#
+--
+--     -- a list of extra field names and types for Var
+--     -- * for a non-record, this is a 'Maybe' ['TypeQ'] instead
+--     -- * 'Nothing' disables the constructor
 --     typeVar :: 'Maybe' [('String', 'TypeQ')],                         #typeVar#
---       -- a list of extra field names and types
---       -- * for a non-record, this is a 'Maybe' ['TypeQ'] instead
---       -- * Nothing disables the constructor
+--
+--     -- same for the others
 --     namePrim :: 'String', typePrim :: 'Maybe' [('String', 'TypeQ')],  #namePrim# #typePrim#
---     nameApp :: 'String', typeApp :: 'Maybe' [('String', 'TypeQ')],    #nameApp# #typeApp#
---     nameAbs :: 'String', typeAbs :: 'Maybe' [('String', 'TypeQ')],    #nameAbs# #typeAbs#
+--     nameApp  :: 'String', typeApp  :: 'Maybe' [('String', 'TypeQ')],  #nameApp#  #typeApp#
+--     nameAbs  :: 'String', typeAbs  :: 'Maybe' [('String', 'TypeQ')],  #nameAbs#  #typeAbs#
+--
+--     -- extra constructors, their names & fields
+--     -- * multiple are possible, represented with nested 'Either'
+--     -- * extensions are records because all of the proper constructors are
+--     -- * otherwise, has type [('String', ['TypeQ'])]
 --     typeLamX :: [('String', [('String', 'TypeQ')])]                   #typeLamX#
---       -- extra constructors, their names & fields
---       -- * multiple are possible, represented with nested 'Either'
---       -- * extensions are records here because all of the proper constructors are
---       -- * otherwise, has type [('String', ['TypeQ'])]
 --   }
 --
 -- -- no extensions (reproduces the input datatype)
@@ -164,6 +177,51 @@
 -- extendLam = ...
 -- @
 --
+-- == De Bruijn terms
+--
+-- @
+-- import <#Base Base>
+--
+-- data DeBruijn    #DeBruijn#
+--
+-- <#extendLam extendLam> \"DBTerm\" [] [t|<#DeBruijn DeBruijn>|] $
+--   -- \"a\" and \"p\" are <#Lam Lam>'s type parameters
+--   \\a p -> <#defaultExtLam defaultExtLam> {
+--     <#typeVar typeVar> = 'Nothing', -- replaced with Free and Bound
+--     <#typeAbs typeAbs> = 'Nothing', -- replaced with a version without absVar
+--     <#typeLamX typeLamX> =
+--       [(\"Free\",  [(\"freeVar\",  a)]),
+--        (\"Bound\", [(\"boundVar\", [t|'Int'|])]),
+--        (\"Abs\",   [(\"absBody\",  [t|<#Lam' Lam'> <#DeBruijn DeBruijn> $a $p|])])]
+--          -- (we have to say Lam' DeBruijn here because
+--          --  the DBTerm alias doesn't exist yet)
+--   }
+--
+-- ====>
+--
+-- type instance <#XVar XVar> <#DeBruijn DeBruijn> a p = 'Void'
+--
+-- type instance <#XPrim XPrim> <#DeBruijn DeBruijn> a p = ()
+-- pattern Prim {primVal} = <#Prim' Prim'> primVal ()
+--
+-- type instance <#XApp XApp> <#DeBruijn DeBruijn> a p = ()
+-- pattern App {appFun, appArg} = <#App' App'> appFun appArg ()
+--
+-- type instance <#XAbs XAbs> <#DeBruijn DeBruijn> a p = 'Void'
+--
+-- type instance LamX DeBruijn a p =
+--   'Either' a                  -- Free
+--     ('Either' 'Int'             -- Bound
+--        (<#Lam' Lam'> <#DeBruijn DeBruijn> a p)) -- Abs
+-- pattern Free  {freeVar}  = <#LamX LamX> ('Left'         freeVar)
+-- pattern Bound {boundVar} = <#LamX LamX> ('Right' ('Left'  boundVar))
+-- pattern Abs   {absBody}  = <#LamX LamX> ('Right' ('Right' absBody))
+--
+-- {-\# COMPLETE Prim, App, Free, Bound, Abs \#-}
+-- @
+--
+-- == Type-annotated terms
+--
 -- @
 -- import <#Base Base>
 -- import Extensible
@@ -174,17 +232,15 @@
 --
 -- data Typed t    #Typed#
 --
--- do t' <- 'newName' \"t\"; let t = 'varT' t'
---      -- create a new type variable for <#Typed Typed>
---      -- ('newName' and 'varT' are reexported from TH by Extensible)
+-- do -- create a new type variable for <#Typed Typed>
+--    -- ('newName' and 'varT' are reexported from TH by Extensible)
+--    t' <- 'newName' \"t\"; let t = 'varT' t'
 --    <#extendLam extendLam> \"TypedLam\" [t'] [t|<#Typed Typed> $t|] $
---      -- \"a\" and \"p\" are <#Lam Lam>'s type parameters
 --      \\a p -> <#defaultExtLam defaultExtLam> {
 --        <#typeVar typeVar> = 'Just' [(\"varType\", [t|<#Type Type> $t|])],
 --        <#typeAbs typeAbs> = 'Just' [(\"absArg\",  [t|<#Type Type> $t|])],
 --        <#typeLamX typeLamX> = [(\"TypeAnn\",
 --           [(\"annTerm\", [t|<#Lam' Lam'> (<#Typed Typed> $t) $a $p|]),
---              -- (the TypedLam alias doesn't exist yet)
 --            (\"annType\", [t|<#Type Type> $t|])])]
 --      }
 --
@@ -209,6 +265,7 @@
 --
 -- {-\# COMPLETE Var, Prim, App, Abs, TypeAnn \#-}
 -- @
+
 module Extensible
   (-- * Name manipulation
    NameAffix (.., NamePrefix, NameSuffix), applyAffix,

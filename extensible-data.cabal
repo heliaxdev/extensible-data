@@ -105,4 +105,4 @@ executable lam
   import: deps, example
   hs-source-dirs: examples/lam
   main-is: Lam.hs
-  other-modules: LamBase
+  other-modules: LamBase, Typed, DeBruijn
