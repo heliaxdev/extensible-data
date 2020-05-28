@@ -128,7 +128,7 @@
 --   ExtLam {
 --     nameVar :: 'String', -- rename a constructor                      #nameVar#
 --     typeVar :: 'Maybe' [('String', 'TypeQ')],                         #typeVar#
---       -- a list of extra field namess and types
+--       -- a list of extra field names and types
 --       -- * for a non-record, this is a 'Maybe' ['TypeQ'] instead
 --       -- * Nothing disables the constructor
 --     namePrim :: 'String', typePrim :: 'Maybe' [('String', 'TypeQ')],  #namePrim# #typePrim#
@@ -157,9 +157,9 @@
 --           -> ['Name'] -- ^ extra type variables, if needed
 --           -> 'TypeQ'  -- ^ tag for this variant of the type
 --                     --   (the \"ext\" parameter; should contain the above vars)
---           -> ('TypeQ' -> <#ExtLam ExtLam>)
+--           -> ('TypeQ' -> 'TypeQ' -> <#ExtLam ExtLam>)
 --                     -- ^ description of extension
---                     --   (input is <#Lam Lam>'s \"a\" type variable)
+--                     --   (input is <#Lam Lam>'s type variables a and p)
 --           -> 'DecsQ'
 -- extendLam = ...
 -- @
