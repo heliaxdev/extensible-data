@@ -13,223 +13,266 @@
 -- * A type family is generated for each constructor, taking an argument named
 --   @ext@ for the extension type, followed by the arguments of the datatype.
 --   The names of the type families correspond to the constructors themselves
---   modified with 'annotationName' (see @<#XBar XBar>@ etc below).
+--   modified with 'annotationName' (see @<#XVar XVar>@ etc below).
 -- * An extra type family is generated with the same arguments, named after the
---   datatype modified with 'extensionName' (see @<#FooX FooX>@).
+--   datatype modified with 'extensionName' (see @<#LamX LamX>@).
 -- * The datatype itself is renamed according to 'datatypeName' and given an
 --   extra argument called @ext@ (before the others).
 -- * Each existing constructor is renamed according to 'constructorName', and
 --   given an extra strict field of the corresponding type family generated
 --   above.
 -- * An extra constructor is generated for the extension type family (with the
---   same name), containing it as its sole field (see @<#Foo' Foo'>@ for the
+--   same name), containing it as its sole field (see @<#Lam' Lam'>@ for the
 --   transformation).
 -- * A constraint synonym is generated, named according to 'bundleName', which
---   contains a constraint for each extension (see @<#FooAll FooAll>@).
+--   contains a constraint for each extension (see @<#LamAll LamAll>@).
 -- * A record and TH function are generated for creating new extensions of the
---   base datatype (see @<#FooExt FooExt>@ and @<#extendFoo extendFoo>@).
+--   base datatype (see @<#ExtLam ExtLam>@ and @<#extendLam extendLam>@).
 -- * A standalone @deriving@ declaration is generated for each derived instance
---   listed. __Note that this has some caveats__:
+--   listed.
+--
+-- = Known bugs and shortcomings
+--
+-- * Due to GHC's staging restriction, a Template Haskell function cannot be
+--   spliced in the same module as it is defined. That means it is not possible
+--   to write @'extensible' [d| data Foo = ... |]; extendFoo ...@ within the
+--   same module.
+-- * When using qualified imports, the module containing @extendFoo@ must be
+--   imported using its real name. It can also be imported using an alias if
+--   desired, e.g.
+--   @import qualified LongName; import qualified LongName as L@.
+-- * The same record label cannot be used for multiple different constructors.
+--   (The @DuplicateRecordFields@ extension doesn't seem to lift this
+--   restriction with pattern synonyms.)
+-- * Pattern synonyms do not yet get type annotations, which means that GHC
+--   cannot always work out which variant of the type you want. You will
+--   probably also want to disable the warning in modules calling @extendFoo@
+--   until this is fixed (e.g. with
+--   @{-\# OPTIONS_GHC -Wno-missing-pattern-synonym-signatures \#-}@).
+--
+-- * The @deriving@ supported is quite limited compared to full GHC:
 --
 --     * Only @stock@ and @anyclass@ strategies are supported.
 --     * __The context is not calculated properly like a real deriving clause__.
 --       Instead, a constraint of the given class is required for each type
 --       variable and each extension. If this doesn't work (e.g. you want to
---       derive 'Eq' but have a type variable of kind @'K.Type' -> 'K.Type'@), you
---       must instead write your own declaration outside of the call to
+--       derive 'Eq' but have a type variable of kind @'K.Type' -> 'K.Type'@),
+--       you must instead write your own declaration outside of the call to
 --       'extensible'.
+--     * Deriving for non-regular datatypes (datatypes with recursive
+--       occurrences applied to different types) doesn't work.
 --
--- Due to GHC's staging restriction, it is not possible to write
--- @'extensible' [d| data Foo = ... |]@ and use the generated @extendFoo@
--- function within the same module.
+-- = Language extensions
 --
--- The module where @extensible@ is called needs the following extensions to be
--- enabled:
+-- The module where @extensible@ is called needs the extensions
+-- @TemplateHaskell@, @TypeFamilies@, @FlexibleContexts@,
+-- @UndecidableInstances@, @ConstraintKinds@, @KindSignatures@,
+-- @StandaloneDeriving@ to be enabled.
 --
--- * @TemplateHaskell@,
--- * @TypeFamilies@,
--- * @FlexibleContexts@,
--- * @UndecidableInstances@,
--- * @ConstraintKinds@,
--- * @KindSignatures@, and
--- * @StandaloneDeriving@.
+-- Modules calling @extendFoo@ need @TemplateHaskell@, @TypeFamilies@,
+-- @PatternSynonyms@.
 --
--- Modules calling @extendFoo@ need:
 --
--- * @TemplateHaskell@,
--- * @TypeFamilies@, and
--- * @PatternSynonyms@.
---
--- You will probably also currently want to disable the warning for missing
--- @pattern@ type signatures (@-Wno-missing-pattern-synonym-signatures@).
---
--- == Example with regular constructors
+-- = Example
 --
 -- @
--- module Foo.Base where #Foo_Base#
+-- module Base where    #Base#
 -- import Extensible
 --
--- 'extensible' [d| data Foo a = Bar a | Baz (Foo a) (Foo 'Int') |]
---
--- ====>
---
--- type family XBar ext a #XBar#
--- type family XBaz ext a #XBaz#
--- type family FooX ext a #FooX#
---
--- data Foo' ext a = #Foo'#
---     Bar' a !(<#XBar XBar> ext a) #Bar'#
---   | Baz' (<#Foo' Foo'> ext a) (<#Foo' Foo'> ext 'Int') !(<#XBaz XBaz> ext a) #Baz'#
---   | FooX !(<#FooX FooX> ext a) #FooX#
---
--- -- ('K.Type' from "Data.Kind", not from TH!)
--- type FooAll (c :: 'K.Type' -> 'Constraint') ext a = #FooAll#
---   (c (<#XBar XBar> ext a),
---    c (<#XBaz XBaz> ext a),
---    c (<#FooX FooX> ext a))
---
--- data ExtFoo = ExtFoo { #ExtFoo#
---     nameBar  :: 'String',                        #nameBar#
---     typeBar  :: 'Maybe' ('TypeQ' -> 'TypeQ'),    #typeBar#
---     nameBaz  :: 'String',                        #nameBaz#
---     typeBaz  :: 'Maybe' ('TypeQ' -> 'TypeQ'),    #typeBaz#
---     typeFooX :: [('String', 'TypeQ' -> 'TypeQ')] #typeFooX#
---   }
---
--- defaultExtFoo :: <#ExtFoo ExtFoo> #defaultExtFoo#
--- defaultExtFoo = <#ExtFoo ExtFoo> {
---     <#nameBar nameBar>  = \"Bar\",
---     <#typeBar typeBar>  = 'Just' $ \\_ -> [t| () |],
---     <#nameBaz nameBaz>  = \"Baz\",
---     <#typeBaz typeBaz>  = 'Just' $ \\_ -> [t| () |],
---     <#typeFooX typeFooX> = []
---   }
---
--- extendFoo :: 'String' -- ^ Type alias name  #extendFoo#
---           -> ['Name'] -- ^ Extra type variables
---           -> 'TypeQ'  -- ^ Tag for this annotation
---           -> <#ExtFoo ExtFoo>
---           -> 'DecsQ'
--- extendFoo name vars tag exts = ...
--- @
---
--- @
--- module Foo (module <#Foo.Base Foo.Base>, module Foo) where
--- import <#Foo_Base Foo.Base>
---
--- data QZ #QZ#
---
--- <#extendFoo extendFoo> \"Foo\" [] [t|<#QZ QZ>|] $ <#defaultExtFoo defaultExtFoo> {
---   <#typeBar typeBar> = 'Nothing',  -- disable Bar
---   <#typeFooX typeFooX> =          -- add two new constructors, Quux and Zoop
---     [(\"Quux\", \\_ -> [t|'Int'|]),
---      (\"Zoop\", \\a -> [t|<#Foo' Foo'> <#QZ QZ> $a|])]
--- }
---
--- ====>
---
--- type instance <#XBar XBar> <#QZ QZ> a = 'Void'
--- type instance <#XBaz XBaz> <#QZ QZ> a = ()
--- type instance <#FooX FooX> <#QZ QZ> a = 'Either' 'Int' 'Bool'
---
--- type Foo = <#Foo' Foo'> <#QZ QZ> #Foo#
---
--- -- no pattern for <#Bar' Bar'>
---
--- pattern Baz :: <#Foo Foo> a -> <#Foo Foo> 'Int' -> <#Foo Foo> a #Baz#
--- pattern Baz x y = <#Baz' Baz'> x y ()
---
--- pattern Quux :: 'Int' -> <#Foo Foo> a #Quux#
--- pattern Quux x = <#FooX FooX> ('Left' x)
---
--- pattern Zoop :: <#Foo Foo> a -> <#Foo Foo> a #Zoop#
--- pattern Zoop x = <#FooX FooX> ('Right' x)
---
--- {-\# COMPLETE <#Baz Baz>, <#Quux Quux>, <#Zoop Zoop> #-}
--- @
---
--- @
--- data BarWith b #BarWith#
---
--- do
---   bn <- 'newName' "b"
---   let b = 'varT' bn
---   <#extendFoo extendFoo> \"Foo\" [bn] [t|<#BarWith BarWith> $b|] $
---     <#defaultExtFoo defaultExtFoo> { typeBar = 'Ann' b }
---
--- ====>
---
--- type instance <#XBar XBar> (<#BarWith BarWith> b) a = b
--- type instance <#XBaz XBaz> (<#BarWith BarWith> b) a = ()
--- type instance <#FooX FooX> (<#BarWith BarWith> b) a = 'Either' 'Int' 'Bool'
---
--- type Foo b = <#Foo' Foo'> (<#BarWith BarWith> b) #Foo2#
---
--- pattern Bar :: a -> b -> <#Foo2 Foo> b a #Bar2#
--- pattern Bar x y = <#Bar' Bar'> x y
---
--- pattern Baz :: <#Foo Foo> a -> <#Foo Foo> 'Int' -> <#Foo Foo> a #Baz2#
--- pattern Baz x y = <#Baz' Baz'> x y ()
---
--- {-\# COMPLETE <#Bar2 Bar>, <#Baz2 Baz> #-}
--- @
---
--- == Example with records
---
--- @
--- extensible [d|
---     data Foo = R { bar :: Int, baz :: String }
+-- extensible [d| #LamOrig#
+--   data Lam a p =
+--       Var {varVar :: a}
+--     | Prim {primVal :: p}
+--     | App {appFun, appArg :: Lam a p}
+--     | Abs {absVar :: a, absBody :: Lam a p}
+--     deriving (Eq, Show)
 --   |]
 --
 -- ====>
 --
--- data Foo' ext =
---     R { bar :: Int, baz :: String, extR :: !(XR ext) }
---   | FooX { extFoo :: !(FooX ext) }
---       -- if all input constructors are records, the extension is too
+-- -- type families for each constructor, and one for adding additional ones
+-- type family XVar  ext a p    #XVar#
+-- type family XPrim ext a p    #XPrim#
+-- type family XApp  ext a p    #XApp#
+-- type family XAbs  ext a p    #XAbs#
+-- type family LamX  ext a p    #LamX#
 --
--- type FooAll (c :: 'K.Type' -> 'K.Constaint') ext = ...
+-- data Lam' ext a p = #Lam'#
+--     Var' {                                 #Var'#
+--       varVar :: a,                         #varVar#
+--       extVar :: !(<#XVar XVar> ext a p)    #extVar#
+--         -- each constructor gets a slot for extra fields
+--     }
+--   | Prim' {                          #Prim'#
+--       primVal :: p,                  #primVal#
+--       extPrim :: !(XPrim ext a p)    #extPrim#
+--     }
+--   | App' {                                 #App'#
+--       appFun, appArg :: Lam' ext a p,      #appFun# #appArg#
+--         -- recursive occurrences are dealt with
+--       extApp :: !(<#XApp XApp> ext a p)    #extApp#
+--     }
+--   | Abs' {                                 #Abs'#
+--       absVar :: a p,                       #absVar#
+--       absBody :: Lam' ext a p,             #absBody#
+--       extAbs :: !(<#XLam XLam> ext a p)    #extAbs#
+--     }
+--   | LamX { -- a constructor for extensions      #LamX#
+--       extLam :: !(<#LamX LamX> ext a p)         #extLam#
+--     }
 --
--- type family XR ext
--- type family FooX ext
+-- type LamAll (c :: 'K.Type' -> 'K.Constraint') ext a =    #LamAll#
+--   (c (<#XVar XVar> ext a), c (<#XPrim XPrim> ext a),
+--    c (<#XApp XApp> ext a), c (<#XAbs XAbs> ext a),
+--    c (<#LamX LamX> ext a))
 --
--- data ExtFoo = ExtFoo {
---     nameR :: String,
---     typeR :: ConAnn (String {- extension field label -}, TypeQ),
---     ...
+-- -- deriving clauses transformed to standalone deriving
+-- deriving instance ('Eq'   a, <#LamAll LamAll> 'Eq'   ext a) => 'Eq'   (<#Lam' Lam'> ext a)
+-- deriving instance ('Show' a, <#LamAll LamAll> 'Show' ext a) => 'Show' (<#Lam' Lam'> ext a)
+--
+-- -- a description of an extension
+-- -- (don't rely on the field order; use record syntax instead)
+-- data ExtLam =                                                         #ExtLam#
+--   ExtLam {
+--     -- rename the Var constructor
+--     nameVar :: 'String',                                              #nameVar#
+--
+--     -- a list of extra field names and types for Var
+--     -- * for a non-record, this is a 'Maybe' ['TypeQ'] instead
+--     -- * 'Nothing' disables the constructor
+--     typeVar :: 'Maybe' [('String', 'TypeQ')],                         #typeVar#
+--
+--     -- same for the others
+--     namePrim :: 'String', typePrim :: 'Maybe' [('String', 'TypeQ')],  #namePrim# #typePrim#
+--     nameApp  :: 'String', typeApp  :: 'Maybe' [('String', 'TypeQ')],  #nameApp#  #typeApp#
+--     nameAbs  :: 'String', typeAbs  :: 'Maybe' [('String', 'TypeQ')],  #nameAbs#  #typeAbs#
+--
+--     -- extra constructors, their names & fields
+--     -- * multiple are possible, represented with nested 'Either'
+--     -- * extensions are records because all of the proper constructors are
+--     -- * otherwise, has type [('String', ['TypeQ'])]
+--     typeLamX :: [('String', [('String', 'TypeQ')])]                   #typeLamX#
 --   }
--- defaultExtFoo :: ExtFoo
--- extendFoo :: String -> [Name] -> TypeQ -> ExtFoo -> DecsQ
---   -- same as <#extendFoo above>
+--
+-- -- no extensions (reproduces the input datatype)
+-- defaultExtLam :: <#ExtLam ExtLam>    #defaultExtLam#
+-- defaultExtLam =
+--   <#ExtLam ExtLam> {
+--     <#nameVar  nameVar>  = \"Var\",  <#typeVar  typeVar>  = 'Just' [],
+--     <#namePrim namePrim> = \"Prim\", <#typePrim typePrim> = 'Just' [],
+--     <#nameApp  nameApp>  = \"App\",  <#typeApp  typeApp>  = 'Just' [],
+--     <#nameAbs  nameAbs>  = \"Abs\",  <#typeAbs  typeAbs>  = 'Just' [],
+--     <#typeLamX typeLamX> = []
+--   }
+--
+-- -- produces an extended datatype; see below for details
+-- extendLam :: 'String' -- ^ extended type's name    #extendLam#
+--           -> ['Name'] -- ^ extra type variables, if needed
+--           -> 'TypeQ'  -- ^ tag for this variant of the type
+--                     --   (the \"ext\" parameter; should contain the above vars)
+--           -> ('TypeQ' -> 'TypeQ' -> <#ExtLam ExtLam>)
+--                     -- ^ description of extension
+--                     --   (input is <#Lam Lam>'s type variables a and p)
+--           -> 'DecsQ'
+-- extendLam = ...
 -- @
 --
--- @
--- data A
+-- == De Bruijn terms
 --
--- extendFoo \"FooA\" [] [t|A|] $ defaultExtFoo {
---     typeR = Ann (\"label\", [t|String|]),
---     typeFooX = [(\"Error\", \"text\", [t|String|])]
+-- @
+-- import <#Base Base>
+--
+-- data DeBruijn    #DeBruijn#
+--
+-- <#extendLam extendLam> \"DBTerm\" [] [t|<#DeBruijn DeBruijn>|] $
+--   -- \"a\" and \"p\" are <#Lam Lam>'s type parameters
+--   \\a p -> <#defaultExtLam defaultExtLam> {
+--     <#typeVar typeVar> = 'Nothing', -- replaced with Free and Bound
+--     <#typeAbs typeAbs> = 'Nothing', -- replaced with a version without absVar
+--     <#typeLamX typeLamX> =
+--       [(\"Free\",  [(\"freeVar\",  a)]),
+--        (\"Bound\", [(\"boundVar\", [t|'Int'|])]),
+--        (\"Abs\",   [(\"absBody\",  [t|<#Lam' Lam'> <#DeBruijn DeBruijn> $a $p|])])]
+--          -- (we have to say Lam' DeBruijn here because
+--          --  the DBTerm alias doesn't exist yet)
 --   }
 --
 -- ====>
 --
--- type instance XR A = String
--- type instance FooX A = String
+-- type instance <#XVar XVar> <#DeBruijn DeBruijn> a p = 'Void'
 --
--- type FooA = Foo A
+-- type instance <#XPrim XPrim> <#DeBruijn DeBruijn> a p = ()
+-- pattern Prim {primVal} = <#Prim' Prim'> primVal ()
 --
--- pattern R {bar, baz, label} = R' bar baz label
--- pattern Error {text} = FooX text
+-- type instance <#XApp XApp> <#DeBruijn DeBruijn> a p = ()
+-- pattern App {appFun, appArg} = <#App' App'> appFun appArg ()
 --
--- {-\# COMPLETE R, Error \#-}
+-- type instance <#XAbs XAbs> <#DeBruijn DeBruijn> a p = 'Void'
+--
+-- type instance LamX DeBruijn a p =
+--   'Either' a                  -- Free
+--     ('Either' 'Int'             -- Bound
+--        (<#Lam' Lam'> <#DeBruijn DeBruijn> a p)) -- Abs
+-- pattern Free  {freeVar}  = <#LamX LamX> ('Left'         freeVar)
+-- pattern Bound {boundVar} = <#LamX LamX> ('Right' ('Left'  boundVar))
+-- pattern Abs   {absBody}  = <#LamX LamX> ('Right' ('Right' absBody))
+--
+-- {-\# COMPLETE Prim, App, Free, Bound, Abs \#-}
 -- @
+--
+-- == Type-annotated terms
+--
+-- @
+-- import <#Base Base>
+-- import Extensible
+--
+-- data Type t =                #Type#
+--     Base t                   #Base#
+--   | Arr (Type t) (Type t)    #Arr#
+--
+-- data Typed t    #Typed#
+--
+-- do -- create a new type variable for <#Typed Typed>
+--    -- ('newName' and 'varT' are reexported from TH by Extensible)
+--    t' <- 'newName' \"t\"; let t = 'varT' t'
+--    <#extendLam extendLam> \"TypedLam\" [t'] [t|<#Typed Typed> $t|] $
+--      \\a p -> <#defaultExtLam defaultExtLam> {
+--        <#typeVar typeVar> = 'Just' [(\"varType\", [t|<#Type Type> $t|])],
+--        <#typeAbs typeAbs> = 'Just' [(\"absArg\",  [t|<#Type Type> $t|])],
+--        <#typeLamX typeLamX> = [(\"TypeAnn\",
+--           [(\"annTerm\", [t|<#Lam' Lam'> (<#Typed Typed> $t) $a $p|]),
+--            (\"annType\", [t|<#Type Type> $t|])])]
+--      }
+--
+-- ====>
+--
+-- type TypedLam t = Lam' (Typed t)    #TypedLam#
+--
+-- type instance <#XVar XVar> (<#Typed Typed> t) a p = <#Type Type> t
+-- pattern Var {varVar, varType} = <#Var' Var'> varVar varType
+--
+-- type instance <#XPrim XPrim> (<#Typed Typed> t) a p = ()
+-- pattern Prim {primVal} = <#Prim' Prim'> primVal ()
+--
+-- type instance <#XApp XApp> (<#Typed Typed> t) a p = ()
+-- pattern App {appFun, appArg} = <#App' App'> appFun appArg ()
+--
+-- type instance <#XAbs XAbs> (<#Typed Typed> t) a p = <#Type Type> t
+-- pattern Abs {absVar, absBody, absArg} = <#Abs' Abs'> absVar absBody absArg
+--
+-- type instance <#LamX LamX> (<#Typed Typed> t) a p = (<#Lam' Lam'> (<#Typed Typed> t) a p, <#Type Type> t)
+-- pattern TypeAnn {annTerm, annType} = <#LamX LamX> (annTerm, annType)
+--
+-- {-\# COMPLETE Var, Prim, App, Abs, TypeAnn \#-}
+-- @
+
 module Extensible
   (-- * Name manipulation
    NameAffix (.., NamePrefix, NameSuffix), applyAffix,
    -- ** Template Haskell re-exports
    newName, varT,
    -- * Generating extensible datatypes
-   extensible, extensibleWith, Config (..), defaultConfig, ConAnn(..))
+   extensible, extensibleWith, Config (..), defaultConfig)
 where
 
 import Language.Haskell.TH as TH
@@ -280,16 +323,6 @@ onNameBase f = runIdentity . onNameBaseF (Identity . f)
 -- Foo.preBarSuf
 applyAffix :: NameAffix -> Name -> Name
 applyAffix (NameAffix pre suf) = onNameBase (\b -> pre ++ b ++ suf)
-
-
-fst3 :: (a, b, c) -> a
-fst3 (x, _, _) = x
-
-snd3 :: (a, b, c) -> b
-snd3 (_, y, _) = y
-
-thd3 :: (a, b, c) -> c
-thd3 (_, _, z) = z
 
 
 -- | Qualified a name with a module, /unless/ it is already qualified.
@@ -369,17 +402,6 @@ defaultConfig = Config {
   }
 
 
--- | An annotation for a constructor. @t@ is @'TypeQ' -> ... -> 'TypeQ'@ with
--- one argument for each type variable in the original datatype declaration.
---
--- * 'Ann': the annotation is the given type
--- * 'NoAnn': no annotation (filled in with @()@ automatically by the pattern
---   synonym)
--- * 'Disabled': constructor disabled (annotation type is 'Void' and no pattern
---   synonym generated)
-data ConAnn t = Ann t | NoAnn | Disabled
-
-
 -- | A \"simple\" constructor (non-record, non-GADT)
 data SimpleCon = SimpleCon {
     scName   :: Name,
@@ -454,6 +476,9 @@ tyvarName :: TyVarBndr -> Name
 tyvarName (PlainTV  x)   = x
 tyvarName (KindedTV x _) = x
 
+tvbToTypeExp :: TyVarBndr -> ExpQ
+tvbToTypeExp tv = [|varT $(lift $ tyvarName tv)|]
+
 isRecordFields :: SimpleFields -> Bool
 isRecordFields (NormalFields {}) = False
 isRecordFields (RecFields    {}) = True
@@ -487,15 +512,15 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   bnd <- constraintBundle conf name ext tvs cs
   insts <- fmap concat $
     traverse (makeInstances conf name' (map fst nameMap) ext tvs) derivs
-  (rname, fcnames, fname, rec) <- extRecord conf name tvs cs
+  (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
   return $
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
     efs ++ [efx, bnd] ++ insts ++ [rec] ++ defRec ++ extFun
 
-nonstrict :: Bang
-nonstrict = Bang NoSourceUnpackedness NoSourceStrictness
+nonstrict :: BangQ
+nonstrict = bang noSourceUnpackedness noSourceStrictness
 
 strict :: Bang
 strict = Bang NoSourceUnpackedness SourceStrict
@@ -608,18 +633,18 @@ extendFam' name tvs = do
 --   (type field, name field, constructor name)
 -- * extension constructor field name
 -- * record declaration to splice
-extRecord :: Config -> Name -> [TyVarBndr] -> [SimpleCon]
+extRecord :: Config -> Name -> [SimpleCon]
           -> Q (Name, [(Name, Name, String)], Name, Dec)
-extRecord conf cname tvs cs = do
+extRecord conf cname cs = do
   let rname = applyAffix (extRecordName conf) cname
-      conann c t | isRecordCon c = [t| ConAnn (String, $t) |]
-                 | otherwise     = [t| ConAnn          $t  |]
-      lblList t | extIsRecord cs = [t| [(String, String, $t)] |]
-                | otherwise      = [t| [(String,         $t)] |]
-  tfields  <- traverse (\c -> extRecTypeField conf (conann c) tvs (scName c)) cs
+      conann c | isRecordCon c = [t| Maybe [(String, TypeQ)] |]
+               | otherwise     = [t| Maybe [         TypeQ ] |]
+      extList | extIsRecord cs = [t| [(String, [(String, TypeQ)])] |]
+              | otherwise      = [t| [(String, [         TypeQ ])] |]
+  tfields  <- traverse (\c -> extRecTypeField conf (conann c) (scName c)) cs
   nfields  <- traverse (extRecNameField conf . scName) cs
-  extField <- extRecTypeField conf lblList tvs
-                (applyAffix (extensionName conf) cname)
+  extField <- extRecTypeField conf extList $
+                applyAffix (extensionName conf) cname
   pure (rname,
         zip3 (map fieldName tfields)
              (map fieldName nfields)
@@ -630,22 +655,14 @@ extRecord conf cname tvs cs = do
  where
   fieldName (n, _, _) = n
 
-extRecTypeField :: Config
-                -> (TypeQ -> TypeQ)
-                -> [TyVarBndr] -> Name -> VarBangTypeQ
-extRecTypeField conf f tvs name = do
-  let fname = applyAffix (extRecTypeName conf) name
-  ty <- f (mkTy tvs)
-  pure (fname, nonstrict, ty)
- where
-  mkTy []     = [t|TypeQ|]
-  mkTy (_:xs) = [t|TypeQ -> $(mkTy xs)|]
+extRecTypeField :: Config -> TypeQ -> Name -> VarBangTypeQ
+extRecTypeField conf ty name =
+  varBangType (applyAffix (extRecTypeName conf) name) $ bangType nonstrict ty
 
 extRecNameField :: Config -> Name -> VarBangTypeQ
 extRecNameField conf name = do
-  let fname = applyAffix (extRecNameName conf) name
-  ty <- [t|String|]
-  pure (fname, nonstrict, ty)
+  varBangType (applyAffix (extRecNameName conf) name) $
+    bangType nonstrict [t|String|]
 
 extRecDefault :: Config
               -> Name -- ^ record name
@@ -655,7 +672,7 @@ extRecDefault :: Config
               -> Name -- ^ field name for extension
               -> Q (Name, [Dec])
 extRecDefault conf rname fcnames fname = do
-  let mkField (t, n, c) = [fieldExp t [|NoAnn|], fieldExp n (stringE c)]
+  let mkField (t, n, c) = [fieldExp t [|Just []|], fieldExp n (stringE c)]
       fields = concatMap mkField fcnames
       xfield = fieldExp fname [| [] |]
       dname = applyAffix (defExtRecName conf) rname
@@ -673,18 +690,25 @@ makeExtender conf home name' rname' tvs cs = do
   let name  = qualifyWith home name'
       rname = qualifyWith home rname'
       ename = applyAffix (extFunName conf) name'
-  sig  <- sigD ename [t|String -> [Name] -> TypeQ -> $(conT rname) -> DecsQ|]
+      rtype = go tvs where
+        go []     = conT rname
+        go (_:xs) = [t|TypeQ -> $(go xs)|]
+  sig  <- sigD ename [t|String -> [Name] -> TypeQ -> $rtype -> DecsQ|]
   syn  <- newName "syn"
   vars <- newName "vars"
   tag  <- newName "tag"
   exts <- newName "exts"
-  defn <- [|sequence $ concat $(listE $
-              map (decsForCon conf home exts tag tvs) cs ++
-              [decsForExt conf home exts tag (extIsRecord cs) tvs name,
-               makeTySyn conf home name syn vars tag,
-               completePrag conf exts cs name])|]
-  let val = FunD ename
-        [Clause (map VarP [syn, vars, tag, exts]) (NormalB defn) []]
+  exts' <- newName "exts'"
+  let defn =
+        [|sequence $ concat $(listE $
+            map (decsForCon conf home exts' tag tvs) cs ++
+            [decsForExt conf home exts' tag (extIsRecord cs) tvs name,
+             makeTySyn conf home name syn vars tag,
+             completePrag conf exts' cs name])|]
+  let args = map (\tv -> [|varT $(lift $ tyvarName tv)|]) tvs
+  val <- funD ename
+        [clause (map varP [syn, vars, tag, exts]) (normalB defn)
+         [valD (varP exts') (normalB (appsE (varE exts : args))) []]]
   pure (ename, [sig, val])
 
 -- | Generates a type synonym for an extensible datatype applied to a specific
@@ -709,10 +733,9 @@ decsForCon :: Config
            -> Name -- ^ name of the bound @tag@ variable in @extendX@
            -> [TyVarBndr] -> SimpleCon -> ExpQ
 decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
-  tvs' <- replicateM (length tvs) (newName "a")
   args <- case fields of
     NormalFields fs -> replicateM (length fs) (newName "x")
-    RecFields    fs -> mapM (newName . nameBase . fst3) fs
+    RecFields    fs -> mapM (\(n, _, _) -> newName $ nameBase n) fs
   let tyfam = qualifyWith home $ applyAffix (annotationName conf) name
       name' = qualifyWith home $ applyAffix (constructorName conf) name
       typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
@@ -720,30 +743,33 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
       exts  = varE extsName
       tag   = varE tagName
       isRec = isRecordFields fields
+      tvs'  = listE $ map tvbToTypeExp tvs
   [|let
 #if MIN_VERSION_template_haskell(2,15,0)
         mkTf rhs = tySynInstD $
           tySynEqn Nothing
-            (foldl appT (conT tyfam) $ $tag : map varT tvs')
+            (foldl appT (conT tyfam) $ $tag : $tvs')
             rhs
 #else
-        mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : map varT tvs') rhs
+        mkTf rhs = tySynInstD tyfam $ tySynEqn ($tag : $tvs') rhs
 #endif
         annType = $typeC $exts; patName = mkName $ $nameC $exts
         mkPatSyn args' rhs = patSynD patName lhs implBidir rhs where
           lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|]) args'
     in
     case annType of
-      Ann a ->
-        let ty  = $(if isRec then [|snd a|] else [|a|])
-            ann = mkName $(if isRec then [|fst a|] else stringE "ann")
+      Just as ->
+        let ty = tupT $(if isRec then [|map snd as|] else [|as|])
+            anns =
+              $(if isRec then
+                [|map (mkName . fst) as|]
+              else
+                [|makeVars "ann" $ length as|])
         in
-        [mkTf $(foldl appE [|ty|] [[|varT tv|] | tv <- tvs']),
-         mkPatSyn (args ++ [ann]) (conP name' (map varP (args ++ [ann])))]
-      NoAnn ->
-        [mkTf (tupleT 0),
-         mkPatSyn args (conP name' (map varP args ++ [conP $(lift '()) []]))]
-      Disabled ->
+        [mkTf ty,
+         mkPatSyn (args ++ anns)
+                  (conP name' (map varP args ++ [tupP (map varP anns)]))]
+      Nothing ->
         [mkTf (conT $(lift ''Void))]
    |]
 
@@ -755,37 +781,41 @@ decsForExt :: Config
            -> Bool -- ^ is the extension a record?
            -> [TyVarBndr] -> Name -> ExpQ
 decsForExt conf home extsName tagName isRec tvs name = do
-  args <- replicateM (length tvs) (newName "a")
   let cname'   = applyAffix (extensionName conf) name
       cname    = qualifyWith home cname'
       typeC    = varE $ applyAffix (extRecTypeName conf) cname'
       tyfam    = applyAffix (extensionName conf) name
       exts     = varE extsName; tag = varE tagName
-      getTy    = if isRec then [|thd3|] else [|snd|]
-      getPName = if isRec then [|fst3|] else [|fst|]
+      getTy    = if isRec then [|map snd|] else [|id|]
+      tvs'     = listE $ map tvbToTypeExp tvs
   [|let typs = $typeC $exts
         tySynRhs = case typs of
           [] -> conT $(lift ''Void)
-          ts -> foldr1 mkEither $ map (appArgs . $getTy) ts
+          ts -> foldr1 mkEither $ map (tupT . $getTy . snd) ts
           where mkEither t u = conT $(lift ''Either) `appT` t `appT` u
-                appArgs t = $(appsE $ [|t|] : map (\x -> [|varT x|]) args)
 #if MIN_VERSION_template_haskell(2,15,0)
         tySyn = tySynInstD $ tySynEqn Nothing
-          (foldl appT (conT tyfam) ($tag : map varT args))
+          (foldl appT (conT tyfam) ($tag : $tvs'))
           tySynRhs
 #else
         tySyn = tySynInstD tyfam $
-          tySynEqn ($tag : map varT args) tySynRhs
+          tySynEqn ($tag : $tvs') tySynRhs
 #endif
-        mkPatSyn mkRhs conann = do
-          let patName = $getPName conann
-          lbl <- $(if isRec then [|pure $ mkName $ snd3 conann|]
-                             else [|newName "x"|])
-          let lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|])
-          patSynD (mkName patName) (lhs [lbl]) implBidir
-            (conP cname [mkRhs (varP lbl)])
+        mkPatSyn mkRhs (patName, flds) =
+          let lbls =
+                $(if isRec then
+                  [|map (mkName . fst) flds|]
+                else
+                  [|makeVars "x" $ length flds|])
+              lhs = $(if isRec then [|recordPatSyn|] else [|prefixPatSyn|])
+          in
+          patSynD (mkName patName) (lhs lbls) implBidir
+            (conP cname [mkRhs (tupP $ map varP lbls)])
     in
     tySyn : zipWith mkPatSyn (makeEithers (length typs)) typs|]
+
+makeVars :: String -> Int -> [Name]
+makeVars pfx n = map (mkName . (pfx ++) . show) $ take n [1 :: Int ..]
 
 -- | Generates an expression producing a @COMPLETE@ pragma.
 completePrag :: Config
@@ -801,11 +831,10 @@ completePrag conf extsName cs name =
         in
         [|$cie (mkName ($nameC $exts)) ($typeC $exts)|]
       typeE = varE $ applyAffix (extRecTypeName <> extensionName $ conf) name
-      getPName = if extIsRecord cs then [|fst3|] else [|fst|]
   in
-  [|let conIfEnabled _ Disabled = []
-        conIfEnabled n _        = [n]
-        allExts = map $ mkName . $getPName
+  [|let conIfEnabled _ Nothing  = []
+        conIfEnabled n (Just _) = [n]
+        allExts = map $ mkName . fst
     in
     [pragCompleteD
       (concat $(listE $ map (mkCie [|conIfEnabled|]) cs) ++
@@ -831,3 +860,9 @@ makeEithers = addEithers' id where
   addEithers' f n =
     (\p -> f [p|Left $p|]) :
     addEithers' (\p -> [p|Right $(f p)|]) (n - 1)
+
+-- | Wraps a list of types in a tuple of the appropriate length, analogously
+-- with 'tupE' and 'tupP'.
+tupT :: [TypeQ] -> TypeQ
+tupT [t] = t
+tupT ts  = foldl appT (tupleT (length ts)) ts

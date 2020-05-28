@@ -94,3 +94,15 @@ executable record
   hs-source-dirs: examples/record
   main-is: Record.hs
   other-modules: RecordBase
+
+executable multifield
+  import: deps, example
+  hs-source-dirs: examples/multifield
+  main-is: MultiField.hs
+  other-modules: MultiFieldBase
+
+executable lam
+  import: deps, example
+  hs-source-dirs: examples/lam
+  main-is: Lam.hs
+  other-modules: LamBase, Typed, DeBruijn
