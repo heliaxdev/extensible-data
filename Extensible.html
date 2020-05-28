@@ -4,15 +4,15 @@
  Peyton&#160;Jones.</p><ul><li>A type family is generated for each constructor, taking an argument named
    <code>ext</code> for the extension type, followed by the arguments of the datatype.
    The names of the type families correspond to the constructors themselves
-   modified with <code><a href="Extensible.html#v:annotationName" title="Extensible">annotationName</a></code> (see <code><a href="#XBar">XBar</a></code> etc below).</li><li>An extra type family is generated with the same arguments, named after the
-   datatype modified with <code><a href="Extensible.html#v:extensionName" title="Extensible">extensionName</a></code> (see <code><a href="#FooX">FooX</a></code>).</li><li>The datatype itself is renamed according to <code><a href="Extensible.html#v:datatypeName" title="Extensible">datatypeName</a></code> and given an
+   modified with <code><a href="Extensible.html#v:annotationName" title="Extensible">annotationName</a></code> (see <code><a href="#XVar">XVar</a></code> etc below).</li><li>An extra type family is generated with the same arguments, named after the
+   datatype modified with <code><a href="Extensible.html#v:extensionName" title="Extensible">extensionName</a></code> (see <code><a href="#LamX">LamX</a></code>).</li><li>The datatype itself is renamed according to <code><a href="Extensible.html#v:datatypeName" title="Extensible">datatypeName</a></code> and given an
    extra argument called <code>ext</code> (before the others).</li><li>Each existing constructor is renamed according to <code><a href="Extensible.html#v:constructorName" title="Extensible">constructorName</a></code>, and
    given an extra strict field of the corresponding type family generated
    above.</li><li>An extra constructor is generated for the extension type family (with the
-   same name), containing it as its sole field (see <code><a href="#Foo'">Foo'</a></code> for the
+   same name), containing it as its sole field (see <code><a href="#Lam'">Lam'</a></code> for the
    transformation).</li><li>A constraint synonym is generated, named according to <code><a href="Extensible.html#v:bundleName" title="Extensible">bundleName</a></code>, which
-   contains a constraint for each extension (see <code><a href="#FooAll">FooAll</a></code>).</li><li>A record and TH function are generated for creating new extensions of the
-   base datatype (see <code><a href="#FooExt">FooExt</a></code> and <code><a href="#extendFoo">extendFoo</a></code>).</li><li>A standalone <code>deriving</code> declaration is generated for each derived instance
+   contains a constraint for each extension (see <code><a href="#LamAll">LamAll</a></code>).</li><li>A record and TH function are generated for creating new extensions of the
+   base datatype (see <code><a href="#ExtLam">ExtLam</a></code> and <code><a href="#extendLam">extendLam</a></code>).</li><li>A standalone <code>deriving</code> declaration is generated for each derived instance
    listed.</li></ul><h1>Known bugs and shortcomings</h1><ul><li>Due to GHC's staging restriction, a Template Haskell function cannot be
    spliced in the same module as it is defined. That means it is not possible
    to write <code><code><a href="Extensible.html#v:extensible" title="Extensible">extensible</a></code> [d| data Foo = ... |]; extendFoo ...</code> within the
