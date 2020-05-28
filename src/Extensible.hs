@@ -13,21 +13,21 @@
 -- * A type family is generated for each constructor, taking an argument named
 --   @ext@ for the extension type, followed by the arguments of the datatype.
 --   The names of the type families correspond to the constructors themselves
---   modified with 'annotationName' (see @<#XBar XBar>@ etc below).
+--   modified with 'annotationName' (see @<#XVar XVar>@ etc below).
 -- * An extra type family is generated with the same arguments, named after the
---   datatype modified with 'extensionName' (see @<#FooX FooX>@).
+--   datatype modified with 'extensionName' (see @<#LamX LamX>@).
 -- * The datatype itself is renamed according to 'datatypeName' and given an
 --   extra argument called @ext@ (before the others).
 -- * Each existing constructor is renamed according to 'constructorName', and
 --   given an extra strict field of the corresponding type family generated
 --   above.
 -- * An extra constructor is generated for the extension type family (with the
---   same name), containing it as its sole field (see @<#Foo' Foo'>@ for the
+--   same name), containing it as its sole field (see @<#Lam' Lam'>@ for the
 --   transformation).
 -- * A constraint synonym is generated, named according to 'bundleName', which
---   contains a constraint for each extension (see @<#FooAll FooAll>@).
+--   contains a constraint for each extension (see @<#LamAll LamAll>@).
 -- * A record and TH function are generated for creating new extensions of the
---   base datatype (see @<#FooExt FooExt>@ and @<#extendFoo extendFoo>@).
+--   base datatype (see @<#ExtLam ExtLam>@ and @<#extendLam extendLam>@).
 -- * A standalone @deriving@ declaration is generated for each derived instance
 --   listed.
 --
