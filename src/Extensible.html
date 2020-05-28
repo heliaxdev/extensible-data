@@ -128,7 +128,7 @@
 </span><a name="line-128"></a><span class="hs-comment">--   ExtLam {</span><span>
 </span><a name="line-129"></a><span class="hs-comment">--     nameVar :: 'String', -- rename a constructor                      #nameVar#</span><span>
 </span><a name="line-130"></a><span class="hs-comment">--     typeVar :: 'Maybe' [('String', 'TypeQ')],                         #typeVar#</span><span>
-</span><a name="line-131"></a><span class="hs-comment">--       -- a list of extra field namess and types</span><span>
+</span><a name="line-131"></a><span class="hs-comment">--       -- a list of extra field names and types</span><span>
 </span><a name="line-132"></a><span class="hs-comment">--       -- * for a non-record, this is a 'Maybe' ['TypeQ'] instead</span><span>
 </span><a name="line-133"></a><span class="hs-comment">--       -- * Nothing disables the constructor</span><span>
 </span><a name="line-134"></a><span class="hs-comment">--     namePrim :: 'String', typePrim :: 'Maybe' [('String', 'TypeQ')],  #namePrim# #typePrim#</span><span>
@@ -157,9 +157,9 @@
 </span><a name="line-157"></a><span class="hs-comment">--           -&gt; ['Name'] -- ^ extra type variables, if needed</span><span>
 </span><a name="line-158"></a><span class="hs-comment">--           -&gt; 'TypeQ'  -- ^ tag for this variant of the type</span><span>
 </span><a name="line-159"></a><span class="hs-comment">--                     --   (the \&quot;ext\&quot; parameter; should contain the above vars)</span><span>
-</span><a name="line-160"></a><span class="hs-comment">--           -&gt; ('TypeQ' -&gt; &lt;#ExtLam ExtLam&gt;)</span><span>
+</span><a name="line-160"></a><span class="hs-comment">--           -&gt; ('TypeQ' -&gt; 'TypeQ' -&gt; &lt;#ExtLam ExtLam&gt;)</span><span>
 </span><a name="line-161"></a><span class="hs-comment">--                     -- ^ description of extension</span><span>
-</span><a name="line-162"></a><span class="hs-comment">--                     --   (input is &lt;#Lam Lam&gt;'s \&quot;a\&quot; type variable)</span><span>
+</span><a name="line-162"></a><span class="hs-comment">--                     --   (input is &lt;#Lam Lam&gt;'s type variables a and p)</span><span>
 </span><a name="line-163"></a><span class="hs-comment">--           -&gt; 'DecsQ'</span><span>
 </span><a name="line-164"></a><span class="hs-comment">-- extendLam = ...</span><span>
 </span><a name="line-165"></a><span class="hs-comment">-- @</span><span>

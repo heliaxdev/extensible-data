@@ -83,7 +83,7 @@ data ExtLam =                                                         <a id="Ext
   ExtLam {
     nameVar :: <code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/Data-String.html#t:String" title="Data.String">String</a></code>, -- rename a constructor                      <a id="nameVar"></a>
     typeVar :: <code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/GHC-Maybe.html#t:Maybe" title="GHC.Maybe">Maybe</a></code> [(<code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/Data-String.html#t:String" title="Data.String">String</a></code>, <code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code>)],                         <a id="typeVar"></a>
-      -- a list of extra field namess and types
+      -- a list of extra field names and types
       -- * for a non-record, this is a <code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/GHC-Maybe.html#t:Maybe" title="GHC.Maybe">Maybe</a></code> [<code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code>] instead
       -- * Nothing disables the constructor
     namePrim :: <code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/Data-String.html#t:String" title="Data.String">String</a></code>, typePrim :: <code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/GHC-Maybe.html#t:Maybe" title="GHC.Maybe">Maybe</a></code> [(<code><a href="https://hackage.haskell.org/package/base-4.12.0.0/docs/Data-String.html#t:String" title="Data.String">String</a></code>, <code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code>)],  <a id="namePrim"></a> <a id="typePrim"></a>
@@ -112,9 +112,9 @@ extendLam :: <code><a href="https://hackage.haskell.org/package/base-4.12.0.0/do
           -&gt; [<code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Syntax.html#t:Name" title="Language.Haskell.TH.Syntax">Name</a></code>] -- ^ extra type variables, if needed
           -&gt; <code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code>  -- ^ tag for this variant of the type
                     --   (the &quot;ext&quot; parameter; should contain the above vars)
-          -&gt; (<code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code> -&gt; <a href="#ExtLam">ExtLam</a>)
+          -&gt; (<code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code> -&gt; <code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:TypeQ" title="Language.Haskell.TH.Lib.Internal">TypeQ</a></code> -&gt; <a href="#ExtLam">ExtLam</a>)
                     -- ^ description of extension
-                    --   (input is <a href="#Lam">Lam</a>'s &quot;a&quot; type variable)
+                    --   (input is <a href="#Lam">Lam</a>'s type variables a and p)
           -&gt; <code><a href="https://hackage.haskell.org/package/template-haskell-2.14.0.0/docs/Language-Haskell-TH-Lib-Internal.html#t:DecsQ" title="Language.Haskell.TH.Lib.Internal">DecsQ</a></code>
 extendLam = ...
 </pre><pre>import <a href="#Base">Base</a>
