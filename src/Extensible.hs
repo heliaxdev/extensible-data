@@ -449,6 +449,42 @@ simpleData (NewtypeD ctx name tvs kind con derivs) = do
   simpleData $ DataD ctx name tvs kind [makeStrict con] derivs
  where
   makeStrict = everywhere $ mkT $ const $ Bang NoSourceUnpackedness SourceStrict
+simpleData d =
+  fail $
+    "only datatype declarations are supported inside extensible;\n" ++
+    "found " ++ case d of
+      FunD               {} -> "a function"
+      ValD               {} -> "a value"
+      DataD              {} -> "a datatype declaration"
+      NewtypeD           {} -> "a newtype declaration"
+      TySynD             {} -> "a type synonym"
+      ClassD             {} -> "a class"
+      InstanceD          {} -> "an instance"
+      SigD               {} -> "a type signature"
+#if MIN_VERSION_template_haskell(4,16,0)
+  -- ghc 8.10
+      KiSigD             {} -> "a kind signature" -- TODO should be supported
+#endif
+      ForeignD           {} -> "an FFI declaration"
+      InfixD             {} -> "a fixity declaration"
+      PragmaD            {} -> "a pragma"
+      DataFamilyD        {} -> "a data family"
+      DataInstD          {} -> "a data instance"
+      NewtypeInstD       {} -> "a newtype instance"
+      TySynInstD         {} -> "a type instance"
+      OpenTypeFamilyD    {} -> "a type family"
+      ClosedTypeFamilyD  {} -> "a type family"
+      RoleAnnotD         {} -> "a role annotation" -- TODO should be supported
+      StandaloneDerivD   {} -> "a standalone deriving declaration"
+      DefaultSigD        {} -> "a default signature"
+      PatSynD            {} -> "a pattern synonym"
+      PatSynSigD         {} -> "a pattern synonym's type signature"
+#if MIN_VERSION_template_haskell(4,15,0)
+  -- ghc 8.8 (even though ImplicitParams is way older)
+      ImplicitParamBindD {} -> "an implicit parameter"
+#endif
+    -- DataD, NewtypeD, DefaultSigD, ImplicitParamBindD
+    -- will never show up but whatever
 
 -- | Extract a 'SimpleCon' from a 'Con', if it is the 'NormalC' case.
 simpleCon :: Con -> Q SimpleCon
