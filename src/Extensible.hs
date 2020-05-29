@@ -350,11 +350,14 @@ data Config = Config {
     bundleName :: NameAffix,
     -- | Appled to constructor names to get the annotation type family's name
     annotationName :: NameAffix,
+    -- | If extending a record constructor, apply this to the constructor name
+    -- to get the annotation field's label.
+    annotationLabel :: NameAffix,
     -- | Applied to datatype name to get extension constructor & type family's
     -- name
     extensionName :: NameAffix,
-    -- | If extending a record constructor, apply this to the constructor name
-    -- to get the extension field's label.
+    -- | If the extending constructor is a record, apply this to the constructor
+    -- name to get the extension field's label.
     extensionLabel :: NameAffix,
     -- | Applied to datatype name to get extension record name
     extRecordName :: NameAffix,
@@ -382,6 +385,7 @@ data Config = Config {
 --   constructorName = NameSuffix \"'\",
 --   bundleName      = NameSuffix \"All\",
 --   annotationName  = NamePrefix \"X\",
+--   annotationLabel = NamePrefix \"ann\",
 --   extensionName   = NameSuffix \"X\",
 --   extensionLabel  = NamePrefix \"ext\",
 --   extRecordName   = NamePrefix \"Ext\",
@@ -398,6 +402,7 @@ defaultConfig = Config {
     constructorName = NameSuffix "'",
     bundleName      = NameSuffix "All",
     annotationName  = NamePrefix "X",
+    annotationLabel = NamePrefix "ann",
     extensionName   = NameSuffix "X",
     extensionLabel  = NamePrefix "ext",
     extRecordName   = NamePrefix "Ext",
@@ -568,7 +573,7 @@ extendCon conf nameMap ext tvs (SimpleCon name fields) = do
   case fields' of
     NormalFields fs -> pure $ NormalC name' $ fs ++ [(strict, extField)]
     RecFields fs ->
-      let extLabel = applyAffix (extensionLabel conf) name in
+      let extLabel = applyAffix (annotationLabel conf) name in
       pure $ RecC name' $ fs ++ [(extLabel, strict, extField)]
 
 -- | Replaces recursive occurences of the datatype with the new one.
