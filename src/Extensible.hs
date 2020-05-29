@@ -281,7 +281,7 @@ import Generics.SYB (Data, everywhere, mkT)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
-import Data.Kind as K
+import qualified Data.Kind as K
 
 -- ☹
 deriving instance Lift Name
@@ -609,7 +609,7 @@ constraintBundle :: Config
                  -> [TyVarBndr] -> [SimpleCon] -> DecQ
 constraintBundle conf name ext tvs cs = do
   c <- newName "c"
-  ckind <- [t|K.Type -> Constraint|]
+  ckind <- [t|K.Type -> K.Constraint|]
   let cnames = map scName cs
       bname  = applyAffix (bundleName conf) name
       tvs'   = kindedTV c ckind : plainTV ext : tvs
