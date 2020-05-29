@@ -418,13 +418,21 @@ data SimpleCon = SimpleCon {
 data SimpleFields = NormalFields [BangType] | RecFields [VarBangType]
   deriving (Eq, Show, Data)
 
--- | A \"simple\" datatype (no context, no kind signature, no deriving)
-data SimpleData = SimpleData {
-    sdName   :: Name,
-    sdVars   :: [TyVarBndr],
-    sdCons   :: [SimpleCon],
-    sdDerivs :: [SimpleDeriv]
-  } deriving (Eq, Show, Data)
+-- | A \"simple\" datatype (no context, no kind signature, no deriving) or type
+-- synonym
+data SimpleDec =
+    SimpleData {
+      sdName   :: Name,
+      sdVars   :: [TyVarBndr],
+      sdCons   :: [SimpleCon],
+      sdDerivs :: [SimpleDeriv]
+    }
+  | SimpleType {
+      sdName   :: Name,
+      sdVars   :: [TyVarBndr],
+      sdSynRhs :: Type
+    }
+  deriving (Eq, Show, Data)
 
 -- 'SBlank' and 'SStock' have the same effect but the first will trigger
 -- @-Wmissing-deriving-strategies@ if it is enabled and the second requires
@@ -438,31 +446,32 @@ data SimpleDeriv =
     dsContext :: Cxt
   } deriving (Eq, Show, Data)
 
--- | Extract a 'SimpleData' from a 'Dec', if it is a datatype with the given
+-- | Extract a 'SimpleDec' from a 'Dec', if it is a datatype with the given
 -- restrictions.
-simpleData :: WarningType -> Dec -> Q SimpleData
-simpleData _w (DataD ctx name tvs kind cons derivs)
+simpleDec :: WarningType -> Dec -> Q SimpleDec
+simpleDec _w (DataD ctx name tvs kind cons derivs)
   | not $ null ctx    = fail "data contexts unsupported"
   | Just _ <- kind    = fail "kind signatures unsupported"
   | otherwise =
       SimpleData name tvs
         <$> traverse simpleCon cons
         <*> traverse simpleDeriv derivs
-simpleData Error (NewtypeD _ name _ _ _ _) =
+simpleDec Error (NewtypeD _ name _ _ _ _) =
   fail $
     "newtype " ++ nameBase name ++ " found\n" ++
     "please replace it with a datatype"
-simpleData Warn n@(NewtypeD _ name _ _ _ _) = do
+simpleDec Warn n@(NewtypeD _ name _ _ _ _) = do
   reportWarning $
     "replacing newtype " ++ nameBase name ++ " with data\n" ++
     "(due to adding another field and a second constructor)\n" ++
     "you may want to replace the newtype with a (strict) datatype"
-  simpleData Ignore n
-simpleData Ignore (NewtypeD ctx name tvs kind con derivs) =
-  simpleData Ignore $ DataD ctx name tvs kind [makeStrict con] derivs
+  simpleDec Ignore n
+simpleDec Ignore (NewtypeD ctx name tvs kind con derivs) =
+  simpleDec Ignore $ DataD ctx name tvs kind [makeStrict con] derivs
  where
   makeStrict = everywhere $ mkT $ const $ Bang NoSourceUnpackedness SourceStrict
-simpleData _w d =
+simpleDec _w (TySynD n tvs rhs) = pure $ SimpleType n tvs rhs
+simpleDec _w d =
   fail $
     "only datatype declarations are supported inside extensible; found\n" ++
     pprint d
@@ -492,7 +501,7 @@ extensible = extensibleWith defaultConfig
 -- function spits out.
 extensibleWith :: Config -> DecsQ -> DecsQ
 extensibleWith conf ds = do
-  ds'  <- traverse (simpleData (newtypeWarn conf)) =<< ds
+  ds'  <- traverse (simpleDec (newtypeWarn conf)) =<< ds
   home <- loc_module <$> location
   makeExtensible conf home ds'
 
@@ -515,18 +524,18 @@ extIsRecord = all isRecordCon
 
 makeExtensible :: Config
                -> String -- ^ module where @extensible{With}@ was called
-               -> [SimpleData] -> DecsQ
-makeExtensible conf home datas =
+               -> [SimpleDec] -> DecsQ
+makeExtensible conf home decs =
   let nameMap = [(name, applyAffix (datatypeName conf) name)
-                  | SimpleData {sdName = name} <- datas]
-  in concat <$> mapM (makeExtensible1 conf home nameMap) datas
+                  | d <- decs, let name = sdName d]
+  in concat <$> mapM (makeExtensible1 conf home nameMap) decs
 
 makeExtensible1 :: Config
                 -> String -- ^ module where @extensible{With}@ was called
                 -> [(Name, Name)] -- ^ mapping @(old, new)@ for datatype names
-                -> SimpleData -> DecsQ
+                -> SimpleDec -> DecsQ
 makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
-  let name' = applyAffix (datatypeName conf) name
+  let Just name' = lookup name nameMap
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
   cs' <- traverse (extendCon conf nameMap ext tvs) cs
@@ -539,9 +548,13 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
-  return $
+  pure $
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
     efs ++ [efx, bnd] ++ insts ++ [rec] ++ defRec ++ extFun
+makeExtensible1 _conf _home nameMap (SimpleType name tvs rhs) = do
+  let Just name' = lookup name nameMap
+  ext <- newName "ext"
+  pure [TySynD name' tvs $ extendRecursions nameMap ext rhs]
 
 nonstrict :: BangQ
 nonstrict = bang noSourceUnpackedness noSourceStrictness
@@ -572,9 +585,10 @@ extendCon conf nameMap ext tvs (SimpleCon name fields) = do
       pure $ RecC name' $ fs ++ [(extLabel, strict, extField)]
 
 -- | Replaces recursive occurences of the datatype with the new one.
-extendRecursions :: [(Name, Name)] -- ^ original & new datatype names
+extendRecursions :: Data a
+                 => [(Name, Name)] -- ^ original & new datatype names
                  -> Name           -- ^ new type variable name
-                 -> SimpleFields -> SimpleFields
+                 -> a -> a
 extendRecursions nameMap ext = everywhere $ mkT go where
   go (ConT k) | Just new <- lookup k nameMap = ConT new `AppT` VarT ext
   go t = t
