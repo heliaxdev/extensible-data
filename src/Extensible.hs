@@ -441,7 +441,14 @@ simpleData (DataD ctx name tvs kind cons derivs)
       SimpleData name tvs
         <$> traverse simpleCon cons
         <*> traverse simpleDeriv derivs
-simpleData _ = fail "not a datatype"
+simpleData (NewtypeD ctx name tvs kind con derivs) = do
+  reportWarning $
+    "replacing newtype " ++ nameBase name ++ " with data\n" ++
+    "(due to adding another field and a second constructor)\n" ++
+    "you may want to replace the newtype with a (strict) datatype"
+  simpleData $ DataD ctx name tvs kind [makeStrict con] derivs
+ where
+  makeStrict = everywhere $ mkT $ const $ Bang NoSourceUnpackedness SourceStrict
 
 -- | Extract a 'SimpleCon' from a 'Con', if it is the 'NormalC' case.
 simpleCon :: Con -> Q SimpleCon
