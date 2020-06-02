@@ -58,7 +58,8 @@
 --       variable and each extension. If this doesn't work (e.g. you want to
 --       derive 'Eq' but have a type variable of kind @'K.Type' -> 'K.Type'@),
 --       you must instead write your own declaration outside of the call to
---       'extensible'.
+--       'extensible'. The only special case is that 'Generic' is not given
+--       a context.
 --     * Deriving for non-regular datatypes (datatypes with recursive
 --       occurrences applied to different types) doesn't work.
 --
