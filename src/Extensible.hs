@@ -554,7 +554,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
 makeExtensible1 _conf _home nameMap (SimpleType name tvs rhs) = do
   let Just name' = lookup name nameMap
   ext <- newName "ext"
-  pure [TySynD name' tvs $ extendRecursions nameMap ext rhs]
+  pure [TySynD name' (PlainTV ext : tvs) $ extendRecursions nameMap ext rhs]
 
 nonstrict :: BangQ
 nonstrict = bang noSourceUnpackedness noSourceStrictness
