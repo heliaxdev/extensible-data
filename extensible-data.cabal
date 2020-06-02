@@ -101,6 +101,12 @@ executable multifield
   main-is: MultiField.hs
   other-modules: MultiFieldBase
 
+executable type-synonym
+  import: deps, example
+  hs-source-dirs: examples/type-synonym
+  main-is: TypeSynonym.hs
+  other-modules: TypeSynonymBase
+
 executable lam
   import: deps, example
   hs-source-dirs: examples/lam
