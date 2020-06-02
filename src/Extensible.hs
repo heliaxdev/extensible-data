@@ -272,7 +272,7 @@ module Extensible
    -- ** Template Haskell re-exports
    newName, varT,
    -- * Generating extensible datatypes
-   extensible, extensibleWith, Config (..), defaultConfig)
+   extensible, extensibleWith, Config (..), defaultConfig, WarningType (..))
 where
 
 import Language.Haskell.TH as TH
@@ -337,8 +337,10 @@ qualifyWith m n = case nameModule n of
   Just _  -> n
 
 
--- | Configuration options for how to name the generated constructors, type
--- families, etc.
+data WarningType = Ignore | Warn | Error deriving (Eq, Show, Lift)
+
+-- | Configuration options for warning behaviour, as well as how to name the
+-- generated constructors, type families, etc.
 data Config = Config {
     -- | Applied to input datatype's name to get extensible type's name
     datatypeName :: NameAffix,
@@ -366,7 +368,10 @@ data Config = Config {
     defExtRecName :: NameAffix,
     -- | Applied to datatype name to get the name of the extension
     -- generator function
-    extFunName :: NameAffix
+    extFunName :: NameAffix,
+    -- | What to do when encountering a newtype. For @Warn@ and @Ignore@, it is
+    -- treated as a strict datatype.
+    newtypeWarn :: WarningType
   } deriving (Eq, Show, Lift)
 
 -- | Default config:
@@ -375,7 +380,7 @@ data Config = Config {
 -- Config {
 --   datatypeName    = NameSuffix \"'\",
 --   constructorName = NameSuffix \"'\",
---   bundleName      = NameSuffix "All",
+--   bundleName      = NameSuffix \"All\",
 --   annotationName  = NamePrefix \"X\",
 --   extensionName   = NameSuffix \"X\",
 --   extensionLabel  = NamePrefix \"ext\",
@@ -383,7 +388,8 @@ data Config = Config {
 --   extRecTypeName  = NamePrefix \"type\",
 --   extRecNameName  = NamePrefix \"name\",
 --   defExtRecName   = NamePrefix \"default\",
---   extFunName      = NamePrefix \"extend\"
+--   extFunName      = NamePrefix \"extend\",
+--   newtypeWarn     = Warn
 -- }
 -- @
 defaultConfig :: Config
@@ -398,7 +404,8 @@ defaultConfig = Config {
     extRecTypeName  = NamePrefix "type",
     extRecNameName  = NamePrefix "name",
     defExtRecName   = NamePrefix "default",
-    extFunName      = NamePrefix "extend"
+    extFunName      = NamePrefix "extend",
+    newtypeWarn     = Warn
   }
 
 
@@ -433,23 +440,29 @@ data SimpleDeriv =
 
 -- | Extract a 'SimpleData' from a 'Dec', if it is a datatype with the given
 -- restrictions.
-simpleData :: Dec -> Q SimpleData
-simpleData (DataD ctx name tvs kind cons derivs)
+simpleData :: WarningType -> Dec -> Q SimpleData
+simpleData _w (DataD ctx name tvs kind cons derivs)
   | not $ null ctx    = fail "data contexts unsupported"
   | Just _ <- kind    = fail "kind signatures unsupported"
   | otherwise =
       SimpleData name tvs
         <$> traverse simpleCon cons
         <*> traverse simpleDeriv derivs
-simpleData (NewtypeD ctx name tvs kind con derivs) = do
+simpleData Error (NewtypeD _ name _ _ _ _) =
+  fail $
+    "newtype " ++ nameBase name ++ " found\n" ++
+    "please replace it with a datatype"
+simpleData Warn n@(NewtypeD _ name _ _ _ _) = do
   reportWarning $
     "replacing newtype " ++ nameBase name ++ " with data\n" ++
     "(due to adding another field and a second constructor)\n" ++
     "you may want to replace the newtype with a (strict) datatype"
-  simpleData $ DataD ctx name tvs kind [makeStrict con] derivs
+  simpleData Ignore n
+simpleData Ignore (NewtypeD ctx name tvs kind con derivs) =
+  simpleData Ignore $ DataD ctx name tvs kind [makeStrict con] derivs
  where
   makeStrict = everywhere $ mkT $ const $ Bang NoSourceUnpackedness SourceStrict
-simpleData d =
+simpleData _w d =
   fail $
     "only datatype declarations are supported inside extensible; found\n" ++
     pprint d
@@ -479,7 +492,7 @@ extensible = extensibleWith defaultConfig
 -- function spits out.
 extensibleWith :: Config -> DecsQ -> DecsQ
 extensibleWith conf ds = do
-  ds'  <- traverse simpleData =<< ds
+  ds'  <- traverse (simpleData (newtypeWarn conf)) =<< ds
   home <- loc_module <$> location
   makeExtensible conf home ds'
 
