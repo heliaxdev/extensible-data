@@ -58,7 +58,8 @@
 --       variable and each extension. If this doesn't work (e.g. you want to
 --       derive 'Eq' but have a type variable of kind @'K.Type' -> 'K.Type'@),
 --       you must instead write your own declaration outside of the call to
---       'extensible'.
+--       'extensible'. The only special case is that 'Generic' is not given
+--       a context.
 --     * Deriving for non-regular datatypes (datatypes with recursive
 --       occurrences applied to different types) doesn't work.
 --
@@ -278,6 +279,7 @@ where
 import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
 import Generics.SYB (Data, everywhere, mkT)
+import GHC.Generics (Generic)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
@@ -350,11 +352,14 @@ data Config = Config {
     bundleName :: NameAffix,
     -- | Appled to constructor names to get the annotation type family's name
     annotationName :: NameAffix,
+    -- | If extending a record constructor, apply this to the constructor name
+    -- to get the annotation field's label.
+    annotationLabel :: NameAffix,
     -- | Applied to datatype name to get extension constructor & type family's
     -- name
     extensionName :: NameAffix,
-    -- | If extending a record constructor, apply this to the constructor name
-    -- to get the extension field's label.
+    -- | If the extending constructor is a record, apply this to the constructor
+    -- name to get the extension field's label.
     extensionLabel :: NameAffix,
     -- | Applied to datatype name to get extension record name
     extRecordName :: NameAffix,
@@ -382,6 +387,7 @@ data Config = Config {
 --   constructorName = NameSuffix \"'\",
 --   bundleName      = NameSuffix \"All\",
 --   annotationName  = NamePrefix \"X\",
+--   annotationLabel = NamePrefix \"ann\",
 --   extensionName   = NameSuffix \"X\",
 --   extensionLabel  = NamePrefix \"ext\",
 --   extRecordName   = NamePrefix \"Ext\",
@@ -398,6 +404,7 @@ defaultConfig = Config {
     constructorName = NameSuffix "'",
     bundleName      = NameSuffix "All",
     annotationName  = NamePrefix "X",
+    annotationLabel = NamePrefix "ann",
     extensionName   = NameSuffix "X",
     extensionLabel  = NamePrefix "ext",
     extRecordName   = NamePrefix "Ext",
@@ -581,7 +588,7 @@ extendCon conf nameMap ext tvs (SimpleCon name fields) = do
   case fields' of
     NormalFields fs -> pure $ NormalC name' $ fs ++ [(strict, extField)]
     RecFields fs ->
-      let extLabel = applyAffix (extensionLabel conf) name in
+      let extLabel = applyAffix (annotationLabel conf) name in
       pure $ RecC name' $ fs ++ [(extLabel, strict, extField)]
 
 -- | Replaces recursive occurences of the datatype with the new one.
@@ -644,10 +651,10 @@ makeInstances :: Config
 makeInstances conf name names ext tvs (SimpleDeriv strat prds) =
   pure $ map make1 prds
  where
-  make1 prd = StandaloneDerivD strat'
-    (map tvPred tvs ++ map allPred names)
-    (prd `AppT` appExtTvs (ConT name) ext tvs)
-   where
+  make1 prd = StandaloneDerivD strat' ctx (prd `AppT` ty) where
+    ty = appExtTvs (ConT name) ext tvs
+    ctx | prd == ConT ''Generic = []
+        | otherwise             = (map tvPred tvs ++ map allPred names)
     tvPred = AppT prd . VarT . tyvarName
     allPred name' = appExtTvs (ConT bname `AppT` prd) ext tvs
       where bname = applyAffix (bundleName conf) name'

@@ -101,6 +101,17 @@ executable multifield
   main-is: MultiField.hs
   other-modules: MultiFieldBase
 
+executable generic
+  import: deps, example
+  hs-source-dirs: examples/generic
+  main-is: Generic.hs
+
+executable reused-name
+  import: deps, example
+  hs-source-dirs: examples/reused-name
+  main-is: ReusedName.hs
+  other-modules: ReusedNameBase
+
 executable type-synonym
   import: deps, example
   hs-source-dirs: examples/type-synonym
