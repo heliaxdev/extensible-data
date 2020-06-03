@@ -101,6 +101,11 @@ executable multifield
   main-is: MultiField.hs
   other-modules: MultiFieldBase
 
+executable generic
+  import: deps, example
+  hs-source-dirs: examples/generic
+  main-is: Generic.hs
+
 executable lam
   import: deps, example
   hs-source-dirs: examples/lam

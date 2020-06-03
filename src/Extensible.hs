@@ -58,7 +58,8 @@
 --       variable and each extension. If this doesn't work (e.g. you want to
 --       derive 'Eq' but have a type variable of kind @'K.Type' -> 'K.Type'@),
 --       you must instead write your own declaration outside of the call to
---       'extensible'.
+--       'extensible'. The only special case is that 'Generic' is not given
+--       a context.
 --     * Deriving for non-regular datatypes (datatypes with recursive
 --       occurrences applied to different types) doesn't work.
 --
@@ -278,6 +279,7 @@ where
 import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
 import Generics.SYB (Data, everywhere, mkT)
+import GHC.Generics (Generic)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
@@ -630,10 +632,10 @@ makeInstances :: Config
 makeInstances conf name names ext tvs (SimpleDeriv strat prds) =
   pure $ map make1 prds
  where
-  make1 prd = StandaloneDerivD strat'
-    (map tvPred tvs ++ map allPred names)
-    (prd `AppT` appExtTvs (ConT name) ext tvs)
-   where
+  make1 prd = StandaloneDerivD strat' ctx (prd `AppT` ty) where
+    ty = appExtTvs (ConT name) ext tvs
+    ctx | prd == ConT ''Generic = []
+        | otherwise             = (map tvPred tvs ++ map allPred names)
     tvPred = AppT prd . VarT . tyvarName
     allPred name' = appExtTvs (ConT bname `AppT` prd) ext tvs
       where bname = applyAffix (bundleName conf) name'
