@@ -106,6 +106,12 @@ executable generic
   hs-source-dirs: examples/generic
   main-is: Generic.hs
 
+executable reused-name
+  import: deps, example
+  hs-source-dirs: examples/reused-name
+  main-is: ReusedName.hs
+  other-modules: ReusedNameBase
+
 executable lam
   import: deps, example
   hs-source-dirs: examples/lam
