@@ -278,11 +278,12 @@ where
 
 import Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
-import Generics.SYB (Data, everywhere, mkT)
+import Generics.SYB (Data, everywhere, everythingBut, mkT, mkQ)
 import GHC.Generics (Generic)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
+import Data.List (group, sort)
 import qualified Data.Kind as K
 
 -- ☹
@@ -551,7 +552,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   efx <- extensionFam conf name tvs
   bnd <- constraintBundle conf name ext tvs cs
   insts <- fmap concat $
-    traverse (makeInstances conf name' (map fst nameMap) ext tvs) derivs
+    traverse (makeInstances conf name name' (map snd nameMap) cs' ext tvs) derivs
   (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
@@ -642,22 +643,43 @@ constraintBundle conf name ext tvs cs = do
     [applyAffix (extensionName conf) name]
 
 makeInstances :: Config
+              -> Name   -- ^ name of the __input__ datatype
               -> Name   -- ^ name of the __output__ datatype
-              -> [Name] -- ^ names of all datatypes in this group
+              -> [Name] -- ^ names of all __output__ datatypes in this group
+              -> [Con]  -- ^ __output__ constructors of the current type
               -> Name   -- ^ extension type variable name
               -> [TyVarBndr]
               -> SimpleDeriv
               -> DecsQ
-makeInstances conf name names ext tvs (SimpleDeriv strat prds) =
+makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
   pure $ map make1 prds
  where
   make1 prd = StandaloneDerivD strat' ctx (prd `AppT` ty) where
-    ty = appExtTvs (ConT name) ext tvs
+    ty = appExtTvs (ConT name') ext tvs
     ctx | prd == ConT ''Generic = []
-        | otherwise             = (map tvPred tvs ++ map allPred names)
+        | otherwise             =
+            (map tvPred tvs ++ [allPred name] ++ concatMap conContext cons)
+
+    conContext c =
+      map (AppT prd) $ nub' $
+      everythingBut (.) (mkQ (id, False) findOccurrences) c []
+
+    findOccurrences t | Just (f, _) <- unAppsT t, f `elem` names = ((t :), True)
+    findOccurrences _ = (id, False)
+
+    unAppsT (AppT f x) = go f [x] where
+      go (AppT g y) xs = go g (y : xs)
+      go (ConT t)   xs = Just (t, xs)
+      go _          _  = Nothing
+    unAppsT _ = Nothing
+
+    nub' = map head . group . sort
+
+    allPred n = appExtTvs (ConT bname `AppT` prd) ext tvs
+      where bname = applyAffix (bundleName conf) n
+
     tvPred = AppT prd . VarT . tyvarName
-    allPred name' = appExtTvs (ConT bname `AppT` prd) ext tvs
-      where bname = applyAffix (bundleName conf) name'
+
     strat' = case strat of
       SBlank    -> Nothing
       SStock    -> Just StockStrategy
