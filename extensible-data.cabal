@@ -112,6 +112,12 @@ executable reused-name
   main-is: ReusedName.hs
   other-modules: ReusedNameBase
 
+executable type-synonym
+  import: deps, example
+  hs-source-dirs: examples/type-synonym
+  main-is: TypeSynonym.hs
+  other-modules: TypeSynonymBase
+
 executable lam
   import: deps, example
   hs-source-dirs: examples/lam
