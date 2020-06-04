@@ -533,22 +533,28 @@ isRecordFields (RecFields    {}) = True
 isRecordCon :: SimpleCon -> Bool
 isRecordCon = isRecordFields . scFields
 
-isData :: SimpleDec -> Bool
-isData (SimpleData {}) = True
-isData (SimpleType {}) = False
+sdIsData :: SimpleDec -> Bool
+sdIsData (SimpleData {}) = True
+sdIsData (SimpleType {}) = False
 
 extIsRecord :: [SimpleCon] -> Bool
 extIsRecord = all isRecordCon
 
-type NameMap =
-  [(Name {- old name -}, (Name {- new name -}, Bool {- is datatype -}))]
+data TypeInfo =
+  TypeInfo {
+    outName :: Name,
+    isData  :: Bool
+  }
+
+type NameMap = [(Name, TypeInfo)]
 
 makeExtensible :: Config
                -> String -- ^ module where @extensible{With}@ was called
                -> [SimpleDec] -> DecsQ
 makeExtensible conf home decs =
-  let nameMap = [(name, (applyAffix (datatypeName conf) name, isData d))
-                  | d <- decs, let name = sdName d]
+  let nameMap = [(name, TypeInfo name' (sdIsData d))
+                  | d <- decs, let name = sdName d,
+                    let name' = applyAffix (datatypeName conf) name]
   in concat <$> mapM (makeExtensible1 conf home nameMap) decs
 
 makeExtensible1 :: Config
@@ -556,7 +562,7 @@ makeExtensible1 :: Config
                 -> NameMap -- ^ mapping @(old name, (new name, is datatype))@
                 -> SimpleDec -> DecsQ
 makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
-  let Just (name', _) = lookup name nameMap
+  let Just name' = outName <$> lookup name nameMap
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
   cs' <- traverse (extendCon conf nameMap ext tvs) cs
@@ -564,7 +570,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
   bnd <- constraintBundle conf name ext tvs cs
-  let dnames = [n | (_, (n, True)) <- nameMap]
+  let dnames = [outName d | (_, d) <- nameMap, isData d]
   let insts = concatMap (makeInstances conf name name' dnames cs' ext tvs) derivs
   (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
@@ -573,7 +579,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
     efs ++ [efx, bnd] ++ insts ++ [rec] ++ defRec ++ extFun
 makeExtensible1 _conf _home nameMap (SimpleType name tvs rhs) = do
-  let Just (name', _) = lookup name nameMap
+  let Just name' = outName <$> lookup name nameMap
   ext <- newName "ext"
   pure [TySynD name' (PlainTV ext : tvs) $ extendRecursions nameMap ext rhs]
 
@@ -611,7 +617,8 @@ extendRecursions :: Data a
                  -> Name           -- ^ new type variable name
                  -> a -> a
 extendRecursions nameMap ext = everywhere $ mkT go where
-  go (ConT k) | Just (new, _) <- lookup k nameMap = ConT new `AppT` VarT ext
+  go (ConT k) | Just (TypeInfo {outName = out}) <- lookup k nameMap =
+    ConT out `AppT` VarT ext
   go t = t
 
 extensionCon :: Config
