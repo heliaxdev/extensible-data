@@ -276,7 +276,7 @@ module Extensible
    extensible, extensibleWith, Config (..), defaultConfig, WarningType (..))
 where
 
-import Language.Haskell.TH as TH
+import Language.Haskell.TH as TH hiding (cxt)
 import Language.Haskell.TH.Syntax
 import Generics.SYB (Data, everywhere, everythingBut, mkT, mkQ)
 import GHC.Generics (Generic)
