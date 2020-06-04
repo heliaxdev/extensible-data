@@ -680,18 +680,19 @@ makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
    where
     instHead = prd `AppT` appExtTvs (ConT name') ext tvs
 
-    cxt = allPred : concatMap conCxt cons
+    cxt = allPred : nub' (concatMap conCxt cons)
 
     allPred = appExtTvs (ConT bname `AppT` prd) ext tvs
       where bname = applyAffix (bundleName conf) name
+
+    nub' = map head . group . sort
 
     -- search top down for applications f x₁ x₂ ... xₙ, where f is one of the
     -- datatypes from this group or one of the type parameters, and require an
     -- instance for each (if one is found, don't look further—if it's a datatype
     -- its own instance will do the work)
     conCxt =
-      map (AppT prd) . nub' .
-      everythingBut (++) (mkQ ([], False) findOccurrences)
+      map (AppT prd) . everythingBut (++) (mkQ ([], False) findOccurrences)
      where
       findOccurrences t
         | Just f <- appTHead t, f `elem` wanted = ([t], True)
@@ -703,8 +704,6 @@ makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
       appTHead (ConT x)   = Just x
       appTHead (VarT x)   = Just x
       appTHead _          = Nothing
-
-      nub' = map head . group . sort
 
 extendFam' :: Name -> [TyVarBndr] -> DecQ
 extendFam' name tvs = do
