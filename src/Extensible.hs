@@ -571,7 +571,10 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   efx <- extensionFam conf name tvs
   bnd <- constraintBundle conf name ext tvs cs
   let dnames = [outName d | (_, d) <- nameMap, isData d]
-  let insts = concatMap (makeInstances conf name name' dnames cs' ext tvs) derivs
+  let cnames = map scName cs
+  let insts =
+        concatMap (makeInstances conf name cnames name' dnames (cx:cs') ext tvs)
+          derivs
   (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
@@ -664,6 +667,7 @@ constraintBundle conf name ext tvs cs = do
 
 makeInstances :: Config
               -> Name   -- ^ name of the __input__ datatype
+              -> [Name] -- ^ names of the __input__ constructors
               -> Name   -- ^ name of the __output__ datatype
               -> [Name] -- ^ names of all __output__ datatypes in this group
               -> [Con]  -- ^ __output__ constructors of the current type
@@ -671,7 +675,8 @@ makeInstances :: Config
               -> [TyVarBndr]
               -> SimpleDeriv
               -> [Dec]
-makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
+makeInstances conf name cnames name' names cons ext tvs
+              (SimpleDeriv strat prds) =
   map make1 prds
  where
   make1 prd
@@ -680,10 +685,7 @@ makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
    where
     instHead = prd `AppT` appExtTvs (ConT name') ext tvs
 
-    cxt = allPred : nub' (concatMap conCxt cons)
-
-    allPred = appExtTvs (ConT bname `AppT` prd) ext tvs
-      where bname = applyAffix (bundleName conf) name
+    cxt = nub' $ concatMap conCxt cons
 
     nub' = map head . group . sort
 
@@ -698,7 +700,10 @@ makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
         | Just f <- appTHead t, f `elem` wanted = ([t], True)
         | otherwise = ([], False)
 
-      wanted = filter (/= name') names ++ map tyvarName tvs
+      wanted =
+        filter (/= name') names ++ map tyvarName tvs ++
+        map (applyAffix (annotationName conf)) cnames ++
+        [applyAffix (extensionName conf) name]
 
       appTHead (AppT f _) = appTHead f
       appTHead (ConT x)   = Just x
