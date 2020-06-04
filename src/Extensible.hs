@@ -457,8 +457,8 @@ data SimpleDeriv =
 -- | Extract a 'SimpleDec' from a 'Dec', if it is a datatype with the given
 -- restrictions.
 simpleDec :: WarningType -> Dec -> Q SimpleDec
-simpleDec _w (DataD ctx name tvs kind cons derivs)
-  | not $ null ctx    = fail "data contexts unsupported"
+simpleDec _w (DataD cxt name tvs kind cons derivs)
+  | not $ null cxt    = fail "data contexts unsupported"
   | Just _ <- kind    = fail "kind signatures unsupported"
   | otherwise =
       SimpleData name tvs
@@ -474,8 +474,8 @@ simpleDec Warn n@(NewtypeD _ name _ _ _ _) = do
     "(due to adding another field and a second constructor)\n" ++
     "you may want to replace the newtype with a (strict) datatype"
   simpleDec Ignore n
-simpleDec Ignore (NewtypeD ctx name tvs kind con derivs) =
-  simpleDec Ignore $ DataD ctx name tvs kind [makeStrict con] derivs
+simpleDec Ignore (NewtypeD cxt name tvs kind con derivs) =
+  simpleDec Ignore $ DataD cxt name tvs kind [makeStrict con] derivs
  where
   makeStrict = everywhere $ mkT $ const $ Bang NoSourceUnpackedness SourceStrict
 simpleDec _w (TySynD n tvs rhs) = pure $ SimpleType n tvs rhs
@@ -676,11 +676,11 @@ makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
  where
   make1 prd
     | prd == ConT ''Generic = StandaloneDerivD Nothing [] instHead
-    | otherwise             = StandaloneDerivD (toStrat strat) ctx instHead
+    | otherwise             = StandaloneDerivD (toStrat strat) cxt instHead
    where
     instHead = prd `AppT` appExtTvs (ConT name') ext tvs
 
-    ctx = allPred : concatMap conCxt cons
+    cxt = allPred : concatMap conCxt cons
 
     allPred = appExtTvs (ConT bname `AppT` prd) ext tvs
       where bname = applyAffix (bundleName conf) name
