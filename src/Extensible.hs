@@ -559,7 +559,7 @@ makeExtensible conf home decs =
 
 makeExtensible1 :: Config
                 -> String  -- ^ module where @extensible{With}@ was called
-                -> NameMap -- ^ mapping @(old name, (new name, is datatype))@
+                -> NameMap
                 -> SimpleDec -> DecsQ
 makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   let Just name' = outName <$> lookup name nameMap
@@ -680,26 +680,28 @@ makeInstances conf name name' names cons ext tvs (SimpleDeriv strat prds) =
    where
     instHead = prd `AppT` appExtTvs (ConT name') ext tvs
 
-    ctx = tvPreds ++ [allPred] ++ concatMap conCxt cons
-
-    tvPreds = map (AppT prd . VarT . tyvarName) tvs
+    ctx = allPred : concatMap conCxt cons
 
     allPred = appExtTvs (ConT bname `AppT` prd) ext tvs
       where bname = applyAffix (bundleName conf) name
 
     -- search top down for applications f x₁ x₂ ... xₙ, where f is one of the
-    -- datatypes from this group, and require an instance for each
-    -- (if one is found, don't look further—its own instance will do the work)
+    -- datatypes from this group or one of the type parameters, and require an
+    -- instance for each (if one is found, don't look further—if it's a datatype
+    -- its own instance will do the work)
     conCxt =
       map (AppT prd) . nub' .
       everythingBut (++) (mkQ ([], False) findOccurrences)
      where
       findOccurrences t
-        | Just f <- appTHead t, f `elem` names = ([t], True)
+        | Just f <- appTHead t, f `elem` wanted = ([t], True)
         | otherwise = ([], False)
 
+      wanted = filter (/= name') names ++ map tyvarName tvs
+
       appTHead (AppT f _) = appTHead f
-      appTHead (ConT t)   = Just t
+      appTHead (ConT x)   = Just x
+      appTHead (VarT x)   = Just x
       appTHead _          = Nothing
 
       nub' = map head . group . sort
