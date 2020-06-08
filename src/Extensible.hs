@@ -276,13 +276,14 @@ module Extensible
    extensible, extensibleWith, Config (..), defaultConfig, WarningType (..))
 where
 
-import Language.Haskell.TH as TH
+import Language.Haskell.TH as TH hiding (cxt)
 import Language.Haskell.TH.Syntax
-import Generics.SYB (Data, everywhere, mkT)
+import Generics.SYB (Data, everywhere, everythingBut, mkT, mkQ)
 import GHC.Generics (Generic)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Void
+import Data.List (group, sort)
 import qualified Data.Kind as K
 
 -- ☹
@@ -456,8 +457,8 @@ data SimpleDeriv =
 -- | Extract a 'SimpleDec' from a 'Dec', if it is a datatype with the given
 -- restrictions.
 simpleDec :: WarningType -> Dec -> Q SimpleDec
-simpleDec _w (DataD ctx name tvs kind cons derivs)
-  | not $ null ctx    = fail "data contexts unsupported"
+simpleDec _w (DataD cxt name tvs kind cons derivs)
+  | not $ null cxt    = fail "data contexts unsupported"
   | Just _ <- kind    = fail "kind signatures unsupported"
   | otherwise =
       SimpleData name tvs
@@ -473,8 +474,8 @@ simpleDec Warn n@(NewtypeD _ name _ _ _ _) = do
     "(due to adding another field and a second constructor)\n" ++
     "you may want to replace the newtype with a (strict) datatype"
   simpleDec Ignore n
-simpleDec Ignore (NewtypeD ctx name tvs kind con derivs) =
-  simpleDec Ignore $ DataD ctx name tvs kind [makeStrict con] derivs
+simpleDec Ignore (NewtypeD cxt name tvs kind con derivs) =
+  simpleDec Ignore $ DataD cxt name tvs kind [makeStrict con] derivs
  where
   makeStrict = everywhere $ mkT $ const $ Bang NoSourceUnpackedness SourceStrict
 simpleDec _w (TySynD n tvs rhs) = pure $ SimpleType n tvs rhs
@@ -498,6 +499,12 @@ simpleDeriv (DerivClause strat prds) =
   simpleStrat (Just AnyclassStrategy) = pure SAnyclass
   simpleStrat (Just NewtypeStrategy)  = fail "newtype deriving unsupported"
   simpleStrat (Just (ViaStrategy _))  = fail "deriving via unsupported"
+
+toStrat :: SimpleStrategy -> Maybe DerivStrategy
+toStrat SBlank    = Nothing
+toStrat SStock    = Just StockStrategy
+toStrat SAnyclass = Just AnyclassStrategy
+
 
 -- | As 'extensibleWith', using 'defaultConfig'.
 extensible :: DecsQ -> DecsQ
@@ -526,23 +533,36 @@ isRecordFields (RecFields    {}) = True
 isRecordCon :: SimpleCon -> Bool
 isRecordCon = isRecordFields . scFields
 
+sdIsData :: SimpleDec -> Bool
+sdIsData (SimpleData {}) = True
+sdIsData (SimpleType {}) = False
+
 extIsRecord :: [SimpleCon] -> Bool
 extIsRecord = all isRecordCon
+
+data TypeInfo =
+  TypeInfo {
+    outName :: Name,
+    isData  :: Bool
+  }
+
+type NameMap = [(Name, TypeInfo)]
 
 makeExtensible :: Config
                -> String -- ^ module where @extensible{With}@ was called
                -> [SimpleDec] -> DecsQ
 makeExtensible conf home decs =
-  let nameMap = [(name, applyAffix (datatypeName conf) name)
-                  | d <- decs, let name = sdName d]
+  let nameMap = [(name, TypeInfo name' (sdIsData d))
+                  | d <- decs, let name = sdName d,
+                    let name' = applyAffix (datatypeName conf) name]
   in concat <$> mapM (makeExtensible1 conf home nameMap) decs
 
 makeExtensible1 :: Config
-                -> String -- ^ module where @extensible{With}@ was called
-                -> [(Name, Name)] -- ^ mapping @(old, new)@ for datatype names
+                -> String  -- ^ module where @extensible{With}@ was called
+                -> NameMap
                 -> SimpleDec -> DecsQ
 makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
-  let Just name' = lookup name nameMap
+  let Just name' = outName <$> lookup name nameMap
   ext <- newName "ext"
   let tvs' = PlainTV ext : tvs
   cs' <- traverse (extendCon conf nameMap ext tvs) cs
@@ -550,8 +570,11 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
   efs <- traverse (extendFam conf tvs) cs
   efx <- extensionFam conf name tvs
   bnd <- constraintBundle conf name ext tvs cs
-  insts <- fmap concat $
-    traverse (makeInstances conf name' (map fst nameMap) ext tvs) derivs
+  let dnames = [outName d | (_, d) <- nameMap, isData d]
+  let cnames = map scName cs
+  let insts =
+        concatMap (makeInstances conf name cnames name' dnames (cx:cs') ext tvs)
+          derivs
   (rname, fcnames, fname, rec) <- extRecord conf name cs
   (_dname, defRec) <- extRecDefault conf rname fcnames fname
   (_ename, extFun) <- makeExtender conf home name rname tvs cs
@@ -559,7 +582,7 @@ makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
     DataD [] name' tvs' Nothing (cs' ++ [cx]) [] :
     efs ++ [efx, bnd] ++ insts ++ [rec] ++ defRec ++ extFun
 makeExtensible1 _conf _home nameMap (SimpleType name tvs rhs) = do
-  let Just name' = lookup name nameMap
+  let Just name' = outName <$> lookup name nameMap
   ext <- newName "ext"
   pure [TySynD name' (PlainTV ext : tvs) $ extendRecursions nameMap ext rhs]
 
@@ -576,7 +599,7 @@ appExtTvs t ext tvs = foldl AppT t $ fmap VarT $ ext : fmap tyvarName tvs
 -- | Generate an extended constructor by renaming it, replacing recursive
 -- occurrences of the datatype, and adding an extension field at the end
 extendCon :: Config
-          -> [(Name, Name)] -- ^ original & new datatype names
+          -> NameMap
           -> Name           -- ^ @ext@ type variable name
           -> [TyVarBndr]    -- ^ original type variables
           -> SimpleCon -> ConQ
@@ -593,11 +616,12 @@ extendCon conf nameMap ext tvs (SimpleCon name fields) = do
 
 -- | Replaces recursive occurences of the datatype with the new one.
 extendRecursions :: Data a
-                 => [(Name, Name)] -- ^ original & new datatype names
+                 => NameMap
                  -> Name           -- ^ new type variable name
                  -> a -> a
 extendRecursions nameMap ext = everywhere $ mkT go where
-  go (ConT k) | Just new <- lookup k nameMap = ConT new `AppT` VarT ext
+  go (ConT k) | Just (TypeInfo {outName = out}) <- lookup k nameMap =
+    ConT out `AppT` VarT ext
   go t = t
 
 extensionCon :: Config
@@ -642,26 +666,49 @@ constraintBundle conf name ext tvs cs = do
     [applyAffix (extensionName conf) name]
 
 makeInstances :: Config
+              -> Name   -- ^ name of the __input__ datatype
+              -> [Name] -- ^ names of the __input__ constructors
               -> Name   -- ^ name of the __output__ datatype
-              -> [Name] -- ^ names of all datatypes in this group
+              -> [Name] -- ^ names of all __output__ datatypes in this group
+              -> [Con]  -- ^ __output__ constructors of the current type
               -> Name   -- ^ extension type variable name
               -> [TyVarBndr]
               -> SimpleDeriv
-              -> DecsQ
-makeInstances conf name names ext tvs (SimpleDeriv strat prds) =
-  pure $ map make1 prds
+              -> [Dec]
+makeInstances conf name cnames name' names cons ext tvs
+              (SimpleDeriv strat prds) =
+  map make1 prds
  where
-  make1 prd = StandaloneDerivD strat' ctx (prd `AppT` ty) where
-    ty = appExtTvs (ConT name) ext tvs
-    ctx | prd == ConT ''Generic = []
-        | otherwise             = (map tvPred tvs ++ map allPred names)
-    tvPred = AppT prd . VarT . tyvarName
-    allPred name' = appExtTvs (ConT bname `AppT` prd) ext tvs
-      where bname = applyAffix (bundleName conf) name'
-    strat' = case strat of
-      SBlank    -> Nothing
-      SStock    -> Just StockStrategy
-      SAnyclass -> Just AnyclassStrategy
+  make1 prd
+    | prd == ConT ''Generic = StandaloneDerivD Nothing [] instHead
+    | otherwise             = StandaloneDerivD (toStrat strat) cxt instHead
+   where
+    instHead = prd `AppT` appExtTvs (ConT name') ext tvs
+
+    cxt = nub' $ concatMap conCxt cons
+
+    nub' = map head . group . sort
+
+    -- search top down for applications f x₁ x₂ ... xₙ, where f is one of the
+    -- datatypes from this group or one of the type parameters, and require an
+    -- instance for each (if one is found, don't look further—if it's a datatype
+    -- its own instance will do the work)
+    conCxt =
+      map (AppT prd) . everythingBut (++) (mkQ ([], False) findOccurrences)
+     where
+      findOccurrences t
+        | Just f <- appTHead t, f `elem` wanted = ([t], True)
+        | otherwise = ([], False)
+
+      wanted =
+        filter (/= name') names ++ map tyvarName tvs ++
+        map (applyAffix (annotationName conf)) cnames ++
+        [applyAffix (extensionName conf) name]
+
+      appTHead (AppT f _) = appTHead f
+      appTHead (ConT x)   = Just x
+      appTHead (VarT x)   = Just x
+      appTHead _          = Nothing
 
 extendFam' :: Name -> [TyVarBndr] -> DecQ
 extendFam' name tvs = do

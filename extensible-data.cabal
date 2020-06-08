@@ -118,6 +118,11 @@ executable type-synonym
   main-is: TypeSynonym.hs
   other-modules: TypeSynonymBase
 
+executable contexts
+  import: deps, example
+  hs-source-dirs: examples/contexts
+  main-is: Contexts.hs
+
 executable lam
   import: deps, example
   hs-source-dirs: examples/lam
