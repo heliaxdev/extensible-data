@@ -271,7 +271,7 @@ module Extensible
   (-- * Name manipulation
    NameAffix (.., NamePrefix, NameSuffix), applyAffix,
    -- ** Template Haskell re-exports
-   newName, varT,
+   newName, varT, Q, Type, TypeQ,
    -- * Generating extensible datatypes
    extensible, extensibleWith, Config (..), defaultConfig, WarningType (..))
 where
