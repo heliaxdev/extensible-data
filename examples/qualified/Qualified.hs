@@ -1,7 +1,7 @@
-import qualified QualifiedBase
+import qualified QualifiedBase as Q
 
-QualifiedBase.extendT "T" [] [t|()|] $ QualifiedBase.defaultExtT {
-  QualifiedBase.typeTX = [("C", [[t|Char|]])]
+Q.extendT "T" [] [t|()|] $ Q.defaultExtT {
+  Q.typeTX = [("C", [[t|Char|]])]
 }
 
 main :: IO ()

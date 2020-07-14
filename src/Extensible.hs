@@ -329,16 +329,22 @@ applyAffix :: NameAffix -> Name -> Name
 applyAffix (NameAffix pre suf) = onNameBase (\b -> pre ++ b ++ suf)
 
 
--- | Qualified a name with a module, /unless/ it is already qualified.
+-- | Qualifies a name with a module, /unless/ it is already qualified.
 --
--- >>> qualifyWith "Mod" (mkName "foo")
+-- >>> qualify _ (Loc {loc_module = "Mod", ..}) (mkName "foo")
 -- Mod.foo
--- >>> qualifyWith "Mod" (mkName "OtherMod.foo")
+-- >>> qualify _ _ (mkName "OtherMod.foo")
 -- OtherMod.foo
-qualifyWith :: String -> Name -> Name
-qualifyWith m n = case nameModule n of
-  Nothing -> mkName (m ++ "." ++ nameBase n)
-  Just _  -> n
+qualify :: NameSpace -> Loc -> Name -> Name
+qualify ns (Loc _ pkg m _ _) n@(Name base f) =
+  case f of
+    NameS -> Name base (NameG ns (PkgName pkg) (ModName m))
+    _     -> n
+
+qualifyV, qualifyD, qualifyT :: Loc -> Name -> Name
+qualifyV = qualify VarName
+qualifyD = qualify DataName
+qualifyT = qualify TcClsName
 
 
 data WarningType = Ignore | Warn | Error deriving (Eq, Show, Lift)
@@ -517,7 +523,7 @@ extensible = extensibleWith defaultConfig
 extensibleWith :: Config -> DecsQ -> DecsQ
 extensibleWith conf ds = do
   ds'  <- traverse (simpleDec (newtypeWarn conf)) =<< ds
-  home <- loc_module <$> location
+  home <- location
   makeExtensible conf home ds'
 
 tyvarName :: TyVarBndr -> Name
@@ -550,7 +556,7 @@ data TypeInfo =
 type NameMap = [(Name, TypeInfo)]
 
 makeExtensible :: Config
-               -> String -- ^ module where @extensible{With}@ was called
+               -> Loc -- ^ where @extensible{With}@ was called
                -> [SimpleDec] -> DecsQ
 makeExtensible conf home decs =
   let nameMap = [(name, TypeInfo name' (sdIsData d))
@@ -559,7 +565,7 @@ makeExtensible conf home decs =
   in concat <$> mapM (makeExtensible1 conf home nameMap) decs
 
 makeExtensible1 :: Config
-                -> String  -- ^ module where @extensible{With}@ was called
+                -> Loc  -- ^ where @extensible{With}@ was called
                 -> NameMap
                 -> SimpleDec -> DecsQ
 makeExtensible1 conf home nameMap (SimpleData name tvs cs derivs) = do
@@ -776,14 +782,13 @@ extRecDefault conf rname fcnames fname = do
 -- | Generate the @extendX@ function, which is used to generate extended
 -- versions of @X@
 makeExtender :: Config
-             -> String -- ^ module where @extensible@ was called
+             -> Loc    -- ^ where @extensible@ was called
              -> Name   -- ^ datatype name
              -> Name   -- ^ extension record name
              -> [TyVarBndr] -> [SimpleCon] -> Q (Name, [Dec])
-makeExtender conf home name' rname' tvs cs = do
-  let name  = qualifyWith home name'
-      rname = qualifyWith home rname'
-      ename = applyAffix (extFunName conf) name'
+makeExtender conf home name rname' tvs cs = do
+  let rname = qualifyT home rname'
+      ename = applyAffix (extFunName conf) name
       rtype = go tvs where
         go []     = conT rname
         go (_:xs) = [t|TypeQ -> $(go xs)|]
@@ -808,21 +813,21 @@ makeExtender conf home name' rname' tvs cs = do
 -- | Generates a type synonym for an extensible datatype applied to a specific
 -- extension type, like @type Foo = Foo' Ext1@.
 makeTySyn :: Config
-          -> String -- ^ module where @extensible@ was called
+          -> Loc    -- ^ where @extensible@ was called
           -> Name   -- ^ datatype name
           -> Name   -- ^ variable containing synonym's name
           -> Name   -- ^ variable containing extension's extra type arguments
           -> Name   -- ^ variable containing tag type
           -> ExpQ
 makeTySyn conf home name syn vars tag =
-  let tyname = qualifyWith home $ applyAffix (datatypeName conf) name in
+  let tyname = qualifyT home $ applyAffix (datatypeName conf) name in
   [|[tySynD (mkName $(varE syn))
             (map plainTV $(varE vars))
             (appT (conT tyname) $(varE tag))]|]
 
 -- | Generates the type instance and pattern synonym (if any) for a constructor.
 decsForCon :: Config
-           -> String -- ^ module where @extensible@ was called
+           -> Loc  -- ^ where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
            -> Name -- ^ name of the bound @tag@ variable in @extendX@
            -> [TyVarBndr] -> SimpleCon -> ExpQ
@@ -830,10 +835,10 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
   args <- case fields of
     NormalFields fs -> replicateM (length fs) (newName "x")
     RecFields    fs -> mapM (\(n, _, _) -> newName $ nameBase n) fs
-  let tyfam = qualifyWith home $ applyAffix (annotationName conf) name
-      name' = qualifyWith home $ applyAffix (constructorName conf) name
-      typeC = varE $ qualifyWith home $ applyAffix (extRecTypeName conf) name
-      nameC = varE $ qualifyWith home $ applyAffix (extRecNameName conf) name
+  let tyfam = qualifyT home $ applyAffix (annotationName conf) name
+      name' = qualifyD home $ applyAffix (constructorName conf) name
+      typeC = varE $ qualifyV home $ applyAffix (extRecTypeName conf) name
+      nameC = varE $ qualifyV home $ applyAffix (extRecNameName conf) name
       exts  = varE extsName
       tag   = varE tagName
       isRec = isRecordFields fields
@@ -869,16 +874,16 @@ decsForCon conf home extsName tagName tvs (SimpleCon name fields) = do
 
 -- | Generates the type instance and pattern synonym(s) for the extension.
 decsForExt :: Config
-           -> String -- ^ module where @extensible@ was called
+           -> Loc  -- ^ where @extensible@ was called
            -> Name -- ^ name of the bound @exts@ variable in @extendX@
            -> Name -- ^ name of the bound @tag@ variable in @extendX@
            -> Bool -- ^ is the extension a record?
            -> [TyVarBndr] -> Name -> ExpQ
 decsForExt conf home extsName tagName isRec tvs name = do
   let cname'   = applyAffix (extensionName conf) name
-      cname    = qualifyWith home cname'
+      cname    = qualifyD home cname'
       typeC    = varE $ applyAffix (extRecTypeName conf) cname'
-      tyfam    = applyAffix (extensionName conf) name
+      tyfam    = qualifyT home $ applyAffix (extensionName conf) name
       exts     = varE extsName; tag = varE tagName
       getTy    = if isRec then [|map snd|] else [|id|]
       tvs'     = listE $ map tvbToTypeExp tvs
