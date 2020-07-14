@@ -225,7 +225,7 @@
 --
 -- @
 -- import <#Base Base>
--- import Extensible
+-- import Extensible hiding (Type)
 --
 -- data Type t =                #Type#
 --     Base t                   #Base#

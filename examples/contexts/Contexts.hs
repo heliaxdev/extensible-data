@@ -1,4 +1,4 @@
-import Extensible
+import Extensible hiding (Type)
 import Data.Kind
 
 -- example from #13

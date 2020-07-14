@@ -1,6 +1,6 @@
 module Typed where
 import LamBase
-import Extensible
+import Extensible hiding (Type)
 
 data NoExt
 
