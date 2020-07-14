@@ -681,11 +681,13 @@ makeInstances conf name cnames name' names cons ext tvs
  where
   make1 prd
     | prd == ConT ''Generic = StandaloneDerivD Nothing [] instHead
+    | prd == ConT ''Data    = StandaloneDerivD (toStrat strat) dataCxt instHead
     | otherwise             = StandaloneDerivD (toStrat strat) cxt instHead
    where
     instHead = prd `AppT` appExtTvs (ConT name') ext tvs
 
     cxt = nub' $ concatMap conCxt cons
+    dataCxt = (ConT ''Data `AppT` VarT ext) : cxt
 
     nub' = map head . group . sort
 
