@@ -693,9 +693,12 @@ makeInstances conf name cnames name' names cons ext tvs
     instHead = prd `AppT` appExtTvs (ConT name') ext tvs
 
     cxt = nub' $ concatMap conCxt cons
-    dataCxt = (ConT ''Data `AppT` VarT ext) : cxt
+    dataCxt = nub' $ map mkData (ext : tvNames) ++ cxt
+      where mkData x = ConT ''Data `AppT` VarT x
 
     nub' = map head . group . sort
+
+    tvNames = map tyvarName tvs
 
     -- search top down for applications f x₁ x₂ ... xₙ, where f is one of the
     -- datatypes from this group or one of the type parameters, and require an
@@ -709,7 +712,7 @@ makeInstances conf name cnames name' names cons ext tvs
         | otherwise = ([], False)
 
       wanted =
-        filter (/= name') names ++ map tyvarName tvs ++
+        filter (/= name') names ++ tvNames ++
         map (applyAffix (annotationName conf)) cnames ++
         [applyAffix (extensionName conf) name]
 
