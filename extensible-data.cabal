@@ -33,9 +33,9 @@ flag dump-splices
 common deps
   default-language: Haskell2010
   build-depends:
-    base >= 4.12.0.0 && < 4.14,
+    base >= 4.12.0.0 && < 4.15,
     syb ^>= 0.7.1,
-    template-haskell >= 2.14.0.0 && < 2.16
+    template-haskell >= 2.14.0.0 && < 2.17
   ghc-options:
     -Wall
 

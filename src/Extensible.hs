@@ -276,7 +276,8 @@ module Extensible
    extensible, extensibleWith, Config (..), defaultConfig, WarningType (..))
 where
 
-import Language.Haskell.TH as TH hiding (cxt)
+import Language.Haskell.TH hiding (cxt, tupP, tupE)
+import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax
 import Generics.SYB (Data, everywhere, everythingBut, mkT, mkQ)
 import GHC.Generics (Generic)
@@ -660,8 +661,7 @@ constraintBundle conf name ext tvs cs = do
       tvs'   = kindedTV c ckind : plainTV ext : tvs
       con1 n = varT c `appT`
                foldl appT (conT n) (varT ext : map (varT . tyvarName) tvs)
-      tupled ts = foldl appT (tupleT (length ts)) ts
-  tySynD bname tvs' $ tupled $ map con1 $
+  tySynD bname tvs' $ tupT $ map con1 $
     map (applyAffix $ annotationName conf) cnames ++
     [applyAffix (extensionName conf) name]
 
@@ -958,3 +958,8 @@ makeEithers = addEithers' id where
 tupT :: [TypeQ] -> TypeQ
 tupT [t] = t
 tupT ts  = foldl appT (tupleT (length ts)) ts
+
+-- in ghc 8.10 this has started using 'GHC.Tuple.Unit' for the unary case
+tupP :: [PatQ] -> PatQ
+tupP [t] = t
+tupP ts  = TH.tupP ts
