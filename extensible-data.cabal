@@ -128,3 +128,26 @@ executable lam
   hs-source-dirs: examples/lam
   main-is: Lam.hs
   other-modules: LamBase, Typed, DeBruijn
+
+
+test-suite test-extensible-data
+  import: deps
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: tests.hs
+  other-modules:
+    Rerename, TestRerename
+  build-depends:
+    extensible-data,
+    containers  ^>= 0.6.2.1,
+    mtl         ^>= 2.2.2,
+    tasty       ^>= 1.3.1,
+    tasty-hunit ^>= 0.10.0.2
+  default-extensions:
+    TemplateHaskell, TypeFamilies, PatternSynonyms, ConstraintKinds,
+    StandaloneDeriving, FlexibleContexts, UndecidableInstances
+  ghc-options:
+    -Wno-unused-top-binds
+    -Wno-missing-pattern-synonym-signatures
+    -Wno-unused-imports
+    -Werror=incomplete-patterns
